@@ -1,5 +1,24 @@
 - [ ] Split rooms for couple (One good, One bad)
 - [ ] Use images for room score?
+  - [ ] Score each room based on its image.
+  - [ ] Provide an output on which images reviewed, and which discarded (common areas)
 - [ ] Adjust algorithm
+  - [ ] Bed
+    - [ ] Couples are prioritized for a double bed, but if the relationship is internal and there is >=1 single bed, a member of the couple is strongly prioritized for a single bed.
+    - [ ] Those currently living in a room with a single bed are prioritized for a single bed.
+    - [ ] Couples external couples are prioritized for a double bed over single people.
+  - [ ] First floor more attractive than ground floor
+    - [ ] First floor higher safety score than ground floor
+      - [ ] Back of house higher safety score than front of house (More so for ground floor)
+  - [ ] Change ground floor safety score to safetyConcern rather than tied to gender
+  - [ ] Remove Kitchen from consideration
+  - [ ] Normalise weights 
+  - [ ] Potentially change bonus from multiplier to fixed bonus
+  - [ ] Brief Housemates on this algo, agree on weights and rules
+  - [ ] Re-Review through chat
 - [ ] Add entropy mode
+- [ ] Thinking flag for ai
 - [ ] Review
+
+- [ ] Create a simple static website explaining the algorithm and its parameters.
+  - [ ] Ai explanation of each parameter, its positive and negative effects and importantly biases
