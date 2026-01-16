@@ -20,7 +20,7 @@
   - [ ] Re-Review through chat
   - [ ] Add bypass to certain parts of the algorithm, eg, ignore kitchenProximity or floor level
 - [ ] Add entropy mode
-- [ ] Thinking flag for ai
+- [x] Thinking flag for ai
 - [ ] Review
 
 - [ ] Add a council mode - runs both deterministic modes, a few runs with entropy, and an AI council (3+ models from different labs)

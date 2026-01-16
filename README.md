@@ -55,3 +55,6 @@ Optional residents flags:
 
 - `--defaults <path>` to load defaults from a people/defaults JSON file
 - `--count <number>` to pre-set the number of residents
+
+When prompted, you can customize the default weights before entering residents.
+Defaults are loaded from `data/people.json` when available.

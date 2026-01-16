@@ -290,16 +290,15 @@ export const solveAssignment = (
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Legacy Compatibility Layer
+// Index-Based Adapter
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Legacy assignment function that returns index-based results.
+ * Assignment function that returns index-based results.
  *
- * This provides backward compatibility with the existing index.ts interface
- * while using the new optimal solver under the hood.
- *
- * @deprecated Use solveAssignment for new code
+ * This is an adapter around solveAssignment that converts the ID-based
+ * result to index-based arrays for compatibility with existing code.
+ * It uses the same optimal solver and deterministic tie-breaking.
  */
 export const assignRooms = (
   scores: number[][],

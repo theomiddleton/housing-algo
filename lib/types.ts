@@ -79,7 +79,6 @@ export type Person = {
   attendedViewing: boolean;
   currentBedType: BedType;
   relationship: Relationship;
-  cooksOften: boolean;
   kitchenPreference?: KitchenPreference;
   hasSafetyConcern?: boolean;
   preferenceWeights?: Partial<PreferenceWeights>;
@@ -177,12 +176,15 @@ export type GeminiScorePayload = {
   questions?: string[];
 };
 
+export type ThinkingLevel = "none" | "low" | "medium" | "high";
+
 export type GeminiCliOptions = {
   model?: string;
   dataPaths: string[];
   webpageUrls: string[];
   imagePaths: string[];
   allowQuestions: boolean;
+  thinkingLevel: ThinkingLevel;
   timeoutMs?: number;
   retries: number;
   debug: boolean;

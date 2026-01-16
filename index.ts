@@ -34,6 +34,7 @@ import type {
   ScoringMode,
   PriorityMode,
   CliOptions,
+  ThinkingLevel,
 } from "./lib/types";
 
 const main = async () => {
@@ -120,6 +121,42 @@ const main = async () => {
     priorityMode = response.priorityMode;
   }
 
+  // Prompt for Gemini-specific options in Gemini mode
+  let geminiOptions = options.gemini;
+  if (mode === "gemini") {
+    // Prompt for allowing questions if not set via flag
+    if (!geminiOptions.allowQuestions) {
+      const response = await prompts({
+        type: "confirm",
+        name: "allowQuestions",
+        message: colors.label("Allow Gemini to ask clarifying questions?"),
+        initial: false,
+      });
+      if (response.allowQuestions) {
+        geminiOptions = { ...geminiOptions, allowQuestions: true };
+      }
+    }
+
+    // Prompt for thinking level if not set via flag
+    if (geminiOptions.thinkingLevel === "none") {
+      const response = await prompts({
+        type: "select",
+        name: "thinkingLevel",
+        message: colors.label("Gemini thinking level"),
+        choices: [
+          { title: "None (fastest, default)", value: "none" },
+          { title: "Low (brief thinking)", value: "low" },
+          { title: "Medium (moderate thinking)", value: "medium" },
+          { title: "High (extensive thinking)", value: "high" },
+        ],
+        initial: 0,
+      });
+      if (response.thinkingLevel) {
+        geminiOptions = { ...geminiOptions, thinkingLevel: response.thinkingLevel };
+      }
+    }
+  }
+
   const loadSpinner = spinner.start("Loading configuration files...");
 
   let houseConfig: HouseConfig;
@@ -168,7 +205,7 @@ const main = async () => {
       roomMetrics,
       peopleMeta,
       {
-        gemini: options.gemini,
+        gemini: geminiOptions,
       },
     );
   }
@@ -311,6 +348,23 @@ const parseCliArgs = (args: string[]): CliOptions => {
     }
   }
 
+  const thinkingLevelRaw = getFlagValue("--gemini-thinking");
+  let thinkingLevel: ThinkingLevel | undefined;
+  if (thinkingLevelRaw) {
+    if (
+      thinkingLevelRaw === "none" ||
+      thinkingLevelRaw === "low" ||
+      thinkingLevelRaw === "medium" ||
+      thinkingLevelRaw === "high"
+    ) {
+      thinkingLevel = thinkingLevelRaw;
+    } else {
+      throw new Error(
+        `Unknown thinking level: ${thinkingLevelRaw}. Use --gemini-thinking none|low|medium|high.`,
+      );
+    }
+  }
+
   const timeoutRaw = getFlagValue("--gemini-timeout");
   const timeoutMs = timeoutRaw
     ? parsePositiveInt(timeoutRaw, "--gemini-timeout")
@@ -333,6 +387,7 @@ const parseCliArgs = (args: string[]): CliOptions => {
       webpageUrls: getFlagValues("--gemini-webpage"),
       imagePaths: getFlagValues("--gemini-image"),
       allowQuestions: geminiQuestions,
+      thinkingLevel: thinkingLevel ?? "none",
       timeoutMs: timeoutMs ?? DEFAULT_GEMINI_TIMEOUT_MS,
       retries: retries ?? DEFAULT_GEMINI_RETRIES,
       debug: args.includes("--gemini-debug"),
@@ -378,6 +433,11 @@ const printUsage = () => {
         {
           flag: "--gemini-questions",
           description: "Let Gemini ask clarifying questions",
+        },
+        {
+          flag: "--gemini-thinking <level>",
+          description: "Thinking depth: none | low | medium | high",
+          default: "none",
         },
         {
           flag: "--gemini-timeout <ms>",

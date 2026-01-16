@@ -23,7 +23,6 @@ const createPerson = (id: string, name?: string): Person => ({
   attendedViewing: false,
   currentBedType: "double",
   relationship: { status: "single", partnerLocation: "none" },
-  cooksOften: false,
 });
 
 const createRoom = (id: string, name?: string): Room => ({

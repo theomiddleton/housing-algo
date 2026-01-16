@@ -79,7 +79,7 @@ type CliOptions = {
 };
 
 const DEFAULT_OUT_PATH = "data/house.json";
-const DEFAULT_MODEL = "gemini-1.5-flash";
+const DEFAULT_MODEL = "gemini-2.5-flash";
 const DEFAULT_MAX_IMAGES = 8;
 const DEFAULT_MAX_FLOORPLANS = 2;
 

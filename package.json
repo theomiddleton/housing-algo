@@ -5,8 +5,8 @@
   "private": true,
   "scripts": {
     "assign": "bun run index.ts",
-    "residents": "bun run residents.ts",
-    "rightmove": "bun run rightmove.ts"
+    "residents": "bun run lib/residents.ts",
+    "rightmove": "bun run lib/rightmove.ts"
   },
   "devDependencies": {
     "@types/bun": "latest",

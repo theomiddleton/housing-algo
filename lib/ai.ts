@@ -19,6 +19,7 @@ import type {
   GeminiScorePayload,
   GeminiCliOptions,
   AiOptions,
+  ThinkingLevel,
 } from "./types";
 
 export const DEFAULT_GEMINI_TIMEOUT_MS = 30000;
@@ -135,6 +136,21 @@ const buildGeminiPrompt = (
     "You are scoring room assignments for a shared house.",
     "Return only JSON, no markdown or commentary.",
     "",
+    "FAIRNESS REQUIREMENT:",
+    "The order in which people are listed is arbitrary and MUST NOT influence your scoring.",
+    "Evaluate each person independently based solely on their individual preferences,",
+    "needs, priorities, and how well each room fits them. Do not favor people listed first.",
+    "",
+    "INTERNAL COUPLES GUIDANCE:",
+    "When two people are in a relationship and both live in the house (partnerLocation: 'house'),",
+    "and rooms with single beds are >=1, ",
+    "assign them ONE double room and ONE single room - NOT two large double rooms.",
+    "Giving an internal couple two big double rooms is wasteful and unfair to others.",
+    "",
+    "EXTERNAL COUPLES GUIDANCE:",
+    "When a person is in a relationship with their partner external to the house (partnerLocation: 'external')",
+    "They should have priority over double bed rooms.",
+    "",
     "When ready, respond with:",
     '{ "scores": [[...]], "reasons": [[...]] }',
     "The scores matrix must have one row per person and one column per room.",
@@ -200,6 +216,21 @@ const buildGeminiParts = (prompt: string, gemini: GeminiInput): Part[] => {
 // API Requests
 // ─────────────────────────────────────────────────────────────────────────────
 
+const getThinkingBudget = (level: ThinkingLevel): number | undefined => {
+  switch (level) {
+    case "none":
+      return 0;
+    case "low":
+      return 1024;
+    case "medium":
+      return 8192;
+    case "high":
+      return 24576;
+    default:
+      return undefined;
+  }
+};
+
 const requestGemini = async (
   client: GoogleGenAI,
   model: string,
@@ -209,16 +240,19 @@ const requestGemini = async (
     debug: boolean;
     round: number;
     maxRounds: number;
+    thinkingLevel: ThinkingLevel;
   },
 ): Promise<string> => {
   if (options.debug) {
     log.info(
-      `Request: model=${colors.highlight(model)}, timeout=${options.timeoutMs}ms, round=${options.round}/${options.maxRounds}`,
+      `Request: model=${colors.highlight(model)}, timeout=${options.timeoutMs}ms, round=${options.round}/${options.maxRounds}, thinking=${options.thinkingLevel}`,
     );
   }
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), options.timeoutMs);
+
+  const thinkingBudget = getThinkingBudget(options.thinkingLevel);
 
   try {
     const response = await client.models.generateContent({
@@ -228,6 +262,8 @@ const requestGemini = async (
         temperature: 0.2,
         responseMimeType: "application/json",
         abortSignal: controller.signal,
+        thinkingConfig:
+          thinkingBudget !== undefined ? { thinkingBudget } : undefined,
       },
     });
 
@@ -538,6 +574,7 @@ export const buildGeminiScores = async (
             debug: geminiOptions.debug,
             round: round + 1,
             maxRounds,
+            thinkingLevel: geminiOptions.thinkingLevel,
           });
 
           if (geminiOptions.debug) {

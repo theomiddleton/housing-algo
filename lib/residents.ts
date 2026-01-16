@@ -66,8 +66,8 @@ type Person = {
   attendedViewing: boolean;
   currentBedType: BedType;
   relationship: Relationship;
-  cooksOften: boolean;
   kitchenPreference?: KitchenPreference;
+
   hasSafetyConcern?: boolean;
   preferenceWeights?: Partial<PreferenceWeights>;
   priorityWeights?: Partial<PriorityWeights>;
@@ -137,6 +137,7 @@ const PRIORITY_KEYS: Array<keyof PriorityWeights> = [
   "attendedViewing",
 ];
 
+
 const main = async () => {
   const options = parseCliArgs(Bun.argv.slice(2));
   if (options.help) {
@@ -146,7 +147,8 @@ const main = async () => {
 
   log.title("Residents Builder");
 
-  const defaults = await loadDefaults(options.defaultsPath);
+  let defaults = await loadDefaults(options.defaultsPath);
+  defaults = await maybeCustomizeDefaults(defaults);
 
   let count = options.count;
   if (!count) {
@@ -293,26 +295,27 @@ const printUsage = () => {
 };
 
 const loadDefaults = async (defaultsPath?: string): Promise<PersonDefaults> => {
-  if (!defaultsPath) {
-    log.info("Using built-in defaults");
-    return FALLBACK_DEFAULTS;
+  const resolvedDefaultPath = defaultsPath
+    ? resolvePath(defaultsPath)
+    : resolvePath("data/people.json");
+
+  const file = Bun.file(resolvedDefaultPath);
+  if (await file.exists()) {
+    const text = await file.text();
+    const parsed = JSON.parse(text) as unknown;
+    const defaults = extractDefaults(parsed);
+    if (defaults) {
+      log.info(`Loaded defaults from ${colors.path(resolvedDefaultPath)}`);
+      return defaults;
+    }
   }
 
-  const resolved = resolvePath(defaultsPath);
-  const file = Bun.file(resolved);
-
-  if (!(await file.exists())) {
-    throw new Error(`Defaults file not found: ${colors.path(resolved)}`);
+  if (defaultsPath) {
+    throw new Error(`Defaults file ${colors.path(resolvedDefaultPath)} does not contain valid defaults.`);
   }
 
-  const text = await file.text();
-  const parsed = JSON.parse(text) as unknown;
-  const defaults = extractDefaults(parsed);
-  if (!defaults) {
-    throw new Error(`Defaults file ${colors.path(resolved)} does not contain valid defaults.`);
-  }
-  log.info(`Loaded defaults from ${colors.path(resolved)}`);
-  return defaults;
+  log.info("Using built-in defaults");
+  return FALLBACK_DEFAULTS;
 };
 
 const extractDefaults = (data: unknown): PersonDefaults | null => {
@@ -321,33 +324,35 @@ const extractDefaults = (data: unknown): PersonDefaults | null => {
   }
 
   const record = data as Record<string, unknown>;
-  const defaultsCandidate = isPersonDefaults(record)
-    ? record
-    : isPeopleConfig(record)
+  const defaultsCandidate = isPeopleConfig(record)
     ? record.defaults
-    : null;
+    : record;
 
-  if (!defaultsCandidate || !isPersonDefaults(defaultsCandidate)) {
+  if (!defaultsCandidate || typeof defaultsCandidate !== "object") {
     return null;
   }
 
-  return defaultsCandidate;
+  const candidate = defaultsCandidate as Partial<PersonDefaults>;
+  if (!isPreferenceWeights(candidate.preferenceWeights) || !isPriorityWeights(candidate.priorityWeights)) {
+    return null;
+  }
+
+  return {
+    ...FALLBACK_DEFAULTS,
+    ...candidate,
+    preferenceWeights: {
+      ...FALLBACK_DEFAULTS.preferenceWeights,
+      ...candidate.preferenceWeights,
+    },
+    priorityWeights: {
+      ...FALLBACK_DEFAULTS.priorityWeights,
+      ...candidate.priorityWeights,
+    },
+  };
 };
 
 const isPeopleConfig = (value: Record<string, unknown>): value is PeopleConfig => {
   return Boolean(value.defaults && value.people);
-};
-
-const isPersonDefaults = (value: Record<string, unknown>): value is PersonDefaults => {
-  return (
-    isPreferenceWeights(value.preferenceWeights) &&
-    isPriorityWeights(value.priorityWeights) &&
-    typeof value.safetyConcern === "number" &&
-    typeof value.bedUpgradeWeight === "number" &&
-    typeof value.bedDowngradePenalty === "number" &&
-    typeof value.doubleBedPartnerWeight === "number" &&
-    typeof value.priorityScale === "number"
-  );
 };
 
 const isPreferenceWeights = (value: unknown): value is PreferenceWeights => {
@@ -365,6 +370,7 @@ const isPriorityWeights = (value: unknown): value is PriorityWeights => {
   const weights = value as PriorityWeights;
   return PRIORITY_KEYS.every((key) => typeof weights[key] === "number");
 };
+
 
 const promptPerson = async (
   defaults: PersonDefaults,
@@ -430,6 +436,7 @@ const promptPerson = async (
     ],
     initial: 3,
   });
+
 
   // Contributions
   const contributions = await prompts([
@@ -507,13 +514,6 @@ const promptPerson = async (
     }
   }
 
-  const { cooksOften } = await prompts({
-    type: "confirm",
-    name: "cooksOften",
-    message: colors.label("Cooks often?"),
-    initial: false,
-  });
-
   const { kitchenPreference } = await prompts({
     type: "select",
     name: "kitchenPreference",
@@ -529,7 +529,7 @@ const promptPerson = async (
   const { hasSafetyConcern } = await prompts({
     type: "confirm",
     name: "hasSafetyConcern",
-    message: colors.label("Has safety concerns? (prefers upper/back rooms)"),
+    message: colors.label("Has safety concerns?"),
     initial: false,
   });
 
@@ -537,7 +537,7 @@ const promptPerson = async (
   const { customizeWeights } = await prompts({
     type: "confirm",
     name: "customizeWeights",
-    message: colors.label("Customize preference/priority weights?"),
+    message: colors.label("Customize this resident's weights?"),
     initial: false,
   });
 
@@ -626,7 +626,6 @@ const promptPerson = async (
     attendedViewing: contributions.attendedViewing ?? false,
     currentBedType,
     relationship,
-    cooksOften: cooksOften ?? false,
     ...(kitchenPreference && kitchenPreference !== "none" ? { kitchenPreference } : {}),
     ...(hasSafetyConcern ? { hasSafetyConcern } : {}),
     ...(preferenceWeights && Object.keys(preferenceWeights).length > 0 ? { preferenceWeights } : {}),
@@ -688,6 +687,129 @@ const promptWeightOverrides = async <T extends Record<string, number>>(
   }
 
   return Object.keys(overrides).length > 0 ? overrides : undefined;
+};
+
+const maybeCustomizeDefaults = async (
+  defaults: PersonDefaults
+): Promise<PersonDefaults> => {
+  const response = await prompts({
+    type: "confirm",
+    name: "customizeDefaults",
+    message: colors.label("Customize default weights before entering residents?"),
+    initial: false,
+  });
+
+  if (!response.customizeDefaults) {
+    return defaults;
+  }
+
+  log.blank();
+  console.log(`  ${colors.dim("Preference weights (0-10 scale, higher = more important)")}`);
+  console.log(`  ${colors.dim("Press Enter to keep default value")}`);
+  log.blank();
+
+  const preferenceWeights = await promptWeightOverrides(
+    "Preference",
+    defaults.preferenceWeights,
+    PREFERENCE_KEYS
+  );
+
+  log.blank();
+  console.log(`  ${colors.dim("Priority weights (points for contributions)")}`);
+  log.blank();
+
+  const priorityWeights = await promptWeightOverrides(
+    "Priority",
+    defaults.priorityWeights,
+    PRIORITY_KEYS
+  );
+
+  log.blank();
+  console.log(`  ${colors.dim("Advanced scoring tweaks")}`);
+  log.blank();
+
+  const advancedOverrides = await prompts([
+    {
+      type: "number",
+      name: "safetyConcern",
+      message: colors.label(`Safety concern (default: ${defaults.safetyConcern})`),
+      initial: defaults.safetyConcern,
+    },
+    {
+      type: "number",
+      name: "bedUpgradeWeight",
+      message: colors.label(`Bed upgrade weight (default: ${defaults.bedUpgradeWeight})`),
+      initial: defaults.bedUpgradeWeight,
+    },
+    {
+      type: "number",
+      name: "bedDowngradePenalty",
+      message: colors.label(`Bed downgrade penalty (default: ${defaults.bedDowngradePenalty})`),
+      initial: defaults.bedDowngradePenalty,
+    },
+    {
+      type: "number",
+      name: "doubleBedPartnerWeight",
+      message: colors.label(`Double bed partner weight (default: ${defaults.doubleBedPartnerWeight})`),
+      initial: defaults.doubleBedPartnerWeight,
+    },
+    {
+      type: "number",
+      name: "singleBedInternalCoupleWeight",
+      message: colors.label(
+        `Single bed internal couple weight (default: ${defaults.singleBedInternalCoupleWeight})`,
+      ),
+      initial: defaults.singleBedInternalCoupleWeight,
+    },
+    {
+      type: "number",
+      name: "doubleBedInternalCoupleWeight",
+      message: colors.label(
+        `Double bed internal couple weight (default: ${defaults.doubleBedInternalCoupleWeight})`,
+      ),
+      initial: defaults.doubleBedInternalCoupleWeight,
+    },
+  ]);
+
+  log.blank();
+  log.info("Defaults saved. Returning to resident input.");
+  log.blank();
+
+  return {
+    ...defaults,
+    preferenceWeights: {
+      ...defaults.preferenceWeights,
+      ...(preferenceWeights ?? {}),
+    },
+    priorityWeights: {
+      ...defaults.priorityWeights,
+      ...(priorityWeights ?? {}),
+    },
+    safetyConcern:
+      advancedOverrides.safetyConcern !== undefined
+        ? advancedOverrides.safetyConcern
+        : defaults.safetyConcern,
+    bedUpgradeWeight:
+      advancedOverrides.bedUpgradeWeight !== undefined
+        ? advancedOverrides.bedUpgradeWeight
+        : defaults.bedUpgradeWeight,
+    bedDowngradePenalty:
+      advancedOverrides.bedDowngradePenalty !== undefined
+        ? advancedOverrides.bedDowngradePenalty
+        : defaults.bedDowngradePenalty,
+    doubleBedPartnerWeight:
+      advancedOverrides.doubleBedPartnerWeight !== undefined
+        ? advancedOverrides.doubleBedPartnerWeight
+        : defaults.doubleBedPartnerWeight,
+    singleBedInternalCoupleWeight:
+      advancedOverrides.singleBedInternalCoupleWeight !== undefined
+        ? advancedOverrides.singleBedInternalCoupleWeight
+        : defaults.singleBedInternalCoupleWeight,
+    doubleBedInternalCoupleWeight:
+      advancedOverrides.doubleBedInternalCoupleWeight !== undefined
+        ? advancedOverrides.doubleBedInternalCoupleWeight
+        : defaults.doubleBedInternalCoupleWeight,
+  };
 };
 
 type PendingPartnerMatch = {
