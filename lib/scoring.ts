@@ -14,6 +14,7 @@ import type {
   PriorityWeights,
   PersonDefaults,
   HouseMeta,
+  PriorityMode,
 } from "./types";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -23,8 +24,23 @@ import type {
 /**
  * Normalizes an array of numbers to the 0-1 range using min-max scaling.
  * Returns all 1s if all values are equal.
+ *
+ * Guards against edge cases:
+ * - Empty arrays return empty arrays
+ * - Arrays with NaN/Infinity values throw an error
  */
 export const normalizeValues = (values: number[]): number[] => {
+  if (values.length === 0) {
+    return [];
+  }
+
+  const hasInvalidValue = values.some((v) => !Number.isFinite(v));
+  if (hasInvalidValue) {
+    throw new Error(
+      "Cannot normalize values: array contains NaN or Infinity. Check that all room attributes are valid numbers.",
+    );
+  }
+
   const min = Math.min(...values);
   const max = Math.max(...values);
   if (max === min) {
@@ -182,6 +198,26 @@ export const personHasSafetyConcern = (meta: PersonMeta): boolean => {
  * - Safety concerns for front-ground rooms
  * - Priority multiplier for contributions to finding the house
  * - Internal couple single bed preference (when house has single beds)
+ *
+ * The priorityMode parameter controls how the priority multiplier is applied:
+ * - "amplify": Multiplies the entire score (preferences + bonuses - penalties)
+ * - "bonus": Only multiplies preferences and bonuses; penalties are applied after
+ *
+ * ## Scoring Scale Notes
+ *
+ * This function combines two types of score components:
+ *
+ * 1. **Normalized preference scores (0-1 range)**: Room attributes like size, windows,
+ *    attractiveness, etc. are normalized to 0-1 and multiplied by preference weights
+ *    (typically 0-10). Example: `metrics.size * weights.size` where size ∈ [0,1].
+ *
+ * 2. **Absolute bonuses/penalties**: Fixed point values added or subtracted based on
+ *    specific conditions (e.g., bedUpgradeWeight=2.5, safetyConcern=4.0).
+ *
+ * The default bonus/penalty values are tuned to represent roughly 10-20% of the
+ * maximum possible preference score (~31 points with default weights). When adjusting
+ * preference weights, be aware that absolute bonuses may need retuning to maintain
+ * their intended relative impact.
  */
 export const scoreRoom = (
   person: Person,
@@ -189,42 +225,45 @@ export const scoreRoom = (
   metrics: RoomMetrics,
   meta: PersonMeta,
   houseMeta: HouseMeta,
+  priorityMode: PriorityMode = "amplify",
 ): number => {
-  let score = 0;
+  let preferenceScore = 0;
+  let bonusScore = 0;
+  let penaltyScore = 0;
 
-  // Base room characteristics
-  score += metrics.size * meta.preferenceWeights.size;
-  score += metrics.windows * meta.preferenceWeights.windows;
-  score += metrics.attractiveness * meta.preferenceWeights.attractiveness;
-  score += metrics.sunlight * meta.preferenceWeights.sunlight;
-  score += metrics.storage * meta.preferenceWeights.storage;
-  score += metrics.quiet * meta.preferenceWeights.quiet;
+  // Base room characteristics (normalized 0-1, weighted)
+  preferenceScore += metrics.size * meta.preferenceWeights.size;
+  preferenceScore += metrics.windows * meta.preferenceWeights.windows;
+  preferenceScore += metrics.attractiveness * meta.preferenceWeights.attractiveness;
+  preferenceScore += metrics.sunlight * meta.preferenceWeights.sunlight;
+  preferenceScore += metrics.storage * meta.preferenceWeights.storage;
+  preferenceScore += metrics.quiet * meta.preferenceWeights.quiet;
 
   // Kitchen proximity preference
   // "close" = bonus for being near kitchen, "far" = bonus for being away from kitchen
   if (meta.kitchenPreference === "close") {
-    score += metrics.kitchenProximity * meta.preferenceWeights.kitchenProximity;
+    preferenceScore += metrics.kitchenProximity * meta.preferenceWeights.kitchenProximity;
   } else if (meta.kitchenPreference === "far") {
-    score += (1 - metrics.kitchenProximity) * meta.preferenceWeights.kitchenProximity;
+    preferenceScore += (1 - metrics.kitchenProximity) * meta.preferenceWeights.kitchenProximity;
   }
 
   // Ensuite preference
-  score += metrics.ensuite * meta.preferenceWeights.ensuite;
+  preferenceScore += metrics.ensuite * meta.preferenceWeights.ensuite;
 
   // Floor level preference (first floor more attractive than ground)
-  score += metrics.floorLevel * meta.preferenceWeights.floor;
+  preferenceScore += metrics.floorLevel * meta.preferenceWeights.floor;
 
   // Bed type base preference
-  score += metrics.bedValue * meta.preferenceWeights.bedType;
+  preferenceScore += metrics.bedValue * meta.preferenceWeights.bedType;
 
   // Bed upgrade bonus (single -> double)
   if (person.currentBedType === "single" && room.bedType === "double") {
-    score += meta.bedUpgradeWeight;
+    bonusScore += meta.bedUpgradeWeight;
   }
 
   // Bed downgrade penalty (double -> single)
   if (person.currentBedType === "double" && room.bedType === "single") {
-    score -= meta.bedDowngradePenalty;
+    penaltyScore += meta.bedDowngradePenalty;
   }
 
   // External partner double bed preference
@@ -234,7 +273,7 @@ export const scoreRoom = (
     person.relationship.partnerLocation === "external"
   ) {
     if (room.bedType === "double") {
-      score += meta.doubleBedPartnerWeight;
+      bonusScore += meta.doubleBedPartnerWeight;
     }
   }
 
@@ -253,20 +292,28 @@ export const scoreRoom = (
     const getsDouble = partnerId ? person.id < partnerId : false;
 
     if (getsDouble && room.bedType === "double") {
-      score += meta.doubleBedInternalCoupleWeight;
+      bonusScore += meta.doubleBedInternalCoupleWeight;
     } else if (!getsDouble && room.bedType === "single") {
-      score += meta.singleBedInternalCoupleWeight;
+      bonusScore += meta.singleBedInternalCoupleWeight;
     }
   }
 
   // Safety penalty based on room risk level (ground floor + front facing = highest risk)
   // Only applies to people with hasSafetyConcern = true
   if (personHasSafetyConcern(meta)) {
-    score -= metrics.safetyRisk * meta.safetyConcern;
+    penaltyScore += metrics.safetyRisk * meta.safetyConcern;
   }
 
-  // Apply priority multiplier
-  return score * meta.priorityMultiplier;
+  // Apply priority multiplier based on mode
+  if (priorityMode === "amplify") {
+    // "amplify": Priority multiplies everything - higher contributors have more
+    // extreme scores in both directions (preferences amplified, penalties amplified)
+    return (preferenceScore + bonusScore - penaltyScore) * meta.priorityMultiplier;
+  } else {
+    // "bonus": Priority only boosts preferences and bonuses; penalties are constant.
+    // This treats priority as a tiebreaker that doesn't penalize contributors more harshly.
+    return (preferenceScore + bonusScore) * meta.priorityMultiplier - penaltyScore;
+  }
 };
 
 /**
@@ -277,6 +324,7 @@ export const buildDeterministicScores = (
   rooms: Room[],
   roomMetrics: RoomMetrics[],
   peopleMeta: PersonMeta[],
+  priorityMode: PriorityMode = "amplify",
 ): number[][] => {
   // Compute house-level metadata
   const houseMeta: HouseMeta = {
@@ -291,6 +339,7 @@ export const buildDeterministicScores = (
         roomMetrics[roomIndex]!,
         peopleMeta[personIndex]!,
         houseMeta,
+        priorityMode,
       );
     });
   });

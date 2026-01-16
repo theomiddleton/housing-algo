@@ -32,6 +32,7 @@ import type {
   Assignment,
   ScoreResult,
   ScoringMode,
+  PriorityMode,
   CliOptions,
 } from "./lib/types";
 
@@ -46,6 +47,7 @@ const main = async () => {
   let housePath = options.housePath;
   let peoplePath = options.peoplePath;
   let mode = options.mode;
+  let priorityMode = options.priorityMode;
 
   if (!housePath) {
     const response = await prompts({
@@ -93,6 +95,31 @@ const main = async () => {
     mode = response.mode;
   }
 
+  // Only prompt for priority mode in deterministic mode
+  if (mode === "deterministic" && !priorityMode) {
+    const response = await prompts({
+      type: "select",
+      name: "priorityMode",
+      message: colors.label("Priority multiplier mode"),
+      choices: [
+        {
+          title: "Amplify (multiplies entire score including penalties)",
+          value: "amplify",
+        },
+        {
+          title: "Bonus (only boosts preferences, penalties stay constant)",
+          value: "bonus",
+        },
+      ],
+      initial: 0,
+    });
+    if (!response.priorityMode) {
+      log.error("Priority mode is required");
+      process.exit(1);
+    }
+    priorityMode = response.priorityMode;
+  }
+
   const loadSpinner = spinner.start("Loading configuration files...");
 
   let houseConfig: HouseConfig;
@@ -130,6 +157,7 @@ const main = async () => {
         houseConfig.rooms,
         roomMetrics,
         peopleMeta,
+        priorityMode ?? "amplify",
       ),
     };
     calcSpinner.succeed("Scores calculated");
@@ -174,6 +202,7 @@ const main = async () => {
         {
           house: houseConfig.name,
           mode: mode,
+          priorityMode: mode === "deterministic" ? (priorityMode ?? "amplify") : undefined,
           totalScore: round(totalScore),
           assignments: result.map((item) => ({
             personId: item.person.id,
@@ -207,6 +236,9 @@ const main = async () => {
   log.blank();
 
   log.item("Mode", mode!);
+  if (mode === "deterministic") {
+    log.item("Priority Mode", priorityMode ?? "amplify");
+  }
   log.item("Total Score", colors.highlight(round(totalScore).toString()));
   log.item("People", peopleConfig.people.length.toString());
   log.item("Rooms", houseConfig.rooms.length.toString());
@@ -267,6 +299,18 @@ const parseCliArgs = (args: string[]): CliOptions => {
     mode = "gemini";
   }
 
+  const priorityModeRaw = getFlagValue("--priority-mode");
+  let priorityMode: PriorityMode | undefined;
+  if (priorityModeRaw) {
+    if (priorityModeRaw === "amplify" || priorityModeRaw === "bonus") {
+      priorityMode = priorityModeRaw;
+    } else {
+      throw new Error(
+        `Unknown priority mode: ${priorityModeRaw}. Use --priority-mode amplify|bonus.`,
+      );
+    }
+  }
+
   const timeoutRaw = getFlagValue("--gemini-timeout");
   const timeoutMs = timeoutRaw
     ? parsePositiveInt(timeoutRaw, "--gemini-timeout")
@@ -280,6 +324,7 @@ const parseCliArgs = (args: string[]): CliOptions => {
     housePath: getFlagValue("--house"),
     peoplePath: getFlagValue("--people"),
     mode,
+    priorityMode,
     json: args.includes("--json"),
     help: args.includes("--help") || args.includes("-h"),
     gemini: {
@@ -308,6 +353,10 @@ const printUsage = () => {
         {
           flag: "--mode <mode>",
           description: "Scoring strategy: deterministic | gemini",
+        },
+        {
+          flag: "--priority-mode <mode>",
+          description: "Priority behavior: amplify | bonus (deterministic only)",
         },
         { flag: "--json", description: "Output JSON for integrations" },
         {

@@ -146,6 +146,17 @@ export type ScoreResult = {
 
 export type ScoringMode = "deterministic" | "gemini";
 
+/**
+ * Controls how the priority multiplier affects final scores.
+ *
+ * - "amplify": Priority multiplies the entire score (preferences + bonuses - penalties).
+ *   Higher priority amplifies both positive and negative effects.
+ *
+ * - "bonus": Priority only boosts preferences and bonuses; penalties remain constant.
+ *   This treats priority as a tiebreaker that doesn't penalize contributors more harshly.
+ */
+export type PriorityMode = "amplify" | "bonus";
+
 export type GeminiAttachment = {
   name: string;
   mimeType: string;
@@ -185,6 +196,7 @@ export type CliOptions = {
   housePath?: string;
   peoplePath?: string;
   mode?: ScoringMode;
+  priorityMode?: PriorityMode;
   json: boolean;
   help: boolean;
   gemini: GeminiCliOptions;
