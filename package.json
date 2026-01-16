@@ -3,10 +3,22 @@
   "module": "index.ts",
   "type": "module",
   "private": true,
+  "scripts": {
+    "assign": "bun run index.ts",
+    "residents": "bun run residents.ts",
+    "rightmove": "bun run rightmove.ts"
+  },
   "devDependencies": {
-    "@types/bun": "latest"
+    "@types/bun": "latest",
+    "@types/prompts": "^2.4.9"
   },
   "peerDependencies": {
     "typescript": "^5"
+  },
+  "dependencies": {
+    "@google/genai": "^1.37.0",
+    "ora": "^9.0.0",
+    "picocolors": "^1.1.1",
+    "prompts": "^2.4.2"
   }
 }

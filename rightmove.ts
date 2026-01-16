@@ -1,3 +1,13 @@
+import {
+  colors,
+  log,
+  spinner,
+  formatHelp,
+  parseArgs as createArgParser,
+  resolvePath,
+  handleError,
+} from "./cli";
+
 type BedType = "single" | "double";
 
 type Room = {
@@ -74,79 +84,109 @@ const DEFAULT_MAX_IMAGES = 8;
 const DEFAULT_MAX_FLOORPLANS = 2;
 
 const main = async () => {
-  const options = parseArgs(Bun.argv.slice(2));
+  const options = parseCliArgs(Bun.argv.slice(2));
   if (options.help) {
     printUsage();
     return;
   }
 
   if (!options.url) {
-    throw new Error("Missing --url. Provide a Rightmove listing URL.");
+    throw new Error(`Missing ${colors.command("--url")}. Provide a Rightmove listing URL.`);
   }
 
-  console.log("Fetching Rightmove listing...");
-  const listing = await scrapeRightmove(options.url);
-  console.log("Generating house data with Gemini. This may take a minute...");
-  const houseConfig = await buildHouseConfig(listing, options);
-  assertHouseConfig(houseConfig);
+  log.title("Rightmove House Builder");
+  log.item("URL", colors.path(options.url));
+  log.item("Model", options.model);
+  log.blank();
 
+  // Scrape the listing
+  const scrapeSpinner = spinner.start("Fetching Rightmove listing...");
+  let listing: RightmoveListing;
+  try {
+    listing = await scrapeRightmove(options.url);
+    scrapeSpinner.succeed(
+      `Found listing: ${colors.highlight(listing.title ?? "Untitled")} (${listing.images.length} photos, ${listing.floorplans.length} floorplans)`
+    );
+  } catch (error) {
+    scrapeSpinner.fail("Failed to fetch listing");
+    throw error;
+  }
+
+  // Generate house config with Gemini
+  const geminiSpinner = spinner.start("Generating house data with Gemini...");
+  let houseConfig: HouseConfig;
+  try {
+    houseConfig = await buildHouseConfig(listing, options, geminiSpinner);
+    assertHouseConfig(houseConfig);
+    geminiSpinner.succeed(`Generated config with ${colors.highlight(houseConfig.rooms.length.toString())} rooms`);
+  } catch (error) {
+    geminiSpinner.fail("Failed to generate house config");
+    throw error;
+  }
+
+  // Write output
   const resolvedOut = resolvePath(options.outPath);
   await Bun.write(resolvedOut, JSON.stringify(houseConfig, null, 2));
-  console.log(`Wrote house data to ${resolvedOut}`);
+
+  log.blank();
+  log.success(`Wrote house data to ${colors.path(resolvedOut)}`);
+  log.blank();
+
+  // Show room summary
+  console.log(colors.label("  Rooms:"));
+  houseConfig.rooms.forEach((room) => {
+    const details = `${room.sizeSqm}sqm, ${room.bedType} bed, floor ${room.floor}`;
+    console.log(`    ${colors.highlight(room.name)} ${colors.dim(`(${details})`)}`);
+  });
+  log.blank();
 };
 
-const parseArgs = (args: string[]): CliOptions => {
-  const getFlagValue = (flag: string): string | undefined => {
-    const index = args.indexOf(flag);
-    if (index === -1) {
-      return undefined;
-    }
-    const value = args[index + 1];
-    if (!value || value.startsWith("--")) {
-      throw new Error(`Missing value for ${flag}.`);
-    }
-    return value;
-  };
+const parseCliArgs = (args: string[]): CliOptions => {
+  const { getFlagValue, parsePositiveInt } = createArgParser(args);
 
-  const parsePositiveInt = (flag: string, fallback: number): number => {
+  const parsePositiveIntFlag = (flag: string, fallback: number): number => {
     const raw = getFlagValue(flag);
-    if (!raw) {
-      return fallback;
-    }
-    const value = Number(raw);
-    if (!Number.isFinite(value) || value <= 0) {
-      throw new Error(`Invalid value for ${flag}: ${raw}. Expected a positive number.`);
-    }
-    return Math.floor(value);
+    if (!raw) return fallback;
+    return parsePositiveInt(raw, flag);
   };
 
   return {
     url: getFlagValue("--url"),
     outPath: getFlagValue("--out") ?? DEFAULT_OUT_PATH,
     model: getFlagValue("--model") ?? Bun.env.GEMINI_MODEL ?? DEFAULT_MODEL,
-    maxImages: parsePositiveInt("--max-images", DEFAULT_MAX_IMAGES),
-    maxFloorplans: parsePositiveInt("--max-floorplans", DEFAULT_MAX_FLOORPLANS),
+    maxImages: parsePositiveIntFlag("--max-images", DEFAULT_MAX_IMAGES),
+    maxFloorplans: parsePositiveIntFlag("--max-floorplans", DEFAULT_MAX_FLOORPLANS),
     help: args.includes("--help") || args.includes("-h"),
   };
 };
 
 const printUsage = () => {
-  console.log("Rightmove house builder");
-  console.log("");
-  console.log("Usage:");
-  console.log("  bun run rightmove.ts --url <rightmove-url> --out data/house.json");
-  console.log("");
-  console.log("Options:");
-  console.log("  --url <url>             Rightmove listing URL");
-  console.log("  --out <path>            Output house JSON file");
-  console.log("  --model <name>          Gemini model (default: GEMINI_MODEL or gemini-1.5-flash)");
-  console.log("  --max-images <count>    Max listing photos to inline (default: 8)");
-  console.log("  --max-floorplans <count> Max floorplan images to inline (default: 2)");
-  console.log("  --help, -h              Show this help");
+  console.log(
+    formatHelp({
+      name: "Rightmove House Builder",
+      description: "Scrape a Rightmove listing and generate house.json using Gemini AI",
+      usage: "bun run rightmove.ts --url <rightmove-url> [options]",
+      options: [
+        { flag: "--url <url>", description: "Rightmove listing URL (required)" },
+        { flag: "--out <path>", description: "Output house JSON file", default: DEFAULT_OUT_PATH },
+        { flag: "--model <name>", description: "Gemini model to use", default: "GEMINI_MODEL or gemini-1.5-flash" },
+        { flag: "--max-images <n>", description: "Max listing photos to analyze", default: String(DEFAULT_MAX_IMAGES) },
+        { flag: "--max-floorplans <n>", description: "Max floorplan images to analyze", default: String(DEFAULT_MAX_FLOORPLANS) },
+        { flag: "--help, -h", description: "Show this help" },
+      ],
+      sections: [
+        {
+          title: "Examples:",
+          content: [
+            colors.command('bun run rightmove.ts --url "https://rightmove.co.uk/..."'),
+            colors.command('bun run rightmove.ts --url "..." --out my-house.json'),
+            colors.command('bun run rightmove.ts --url "..." --max-images 12'),
+          ],
+        },
+      ],
+    })
+  );
 };
-
-const resolvePath = (filePath: string): string =>
-  filePath.startsWith("/") ? filePath : `${process.cwd()}/${filePath}`;
 
 const scrapeRightmove = async (url: string): Promise<RightmoveListing> => {
   const response = await fetch(url, {
@@ -423,7 +463,11 @@ const pickLongest = (values: string[]): string | undefined => {
   );
 };
 
-const buildHouseConfig = async (listing: RightmoveListing, options: CliOptions): Promise<HouseConfig> => {
+const buildHouseConfig = async (
+  listing: RightmoveListing,
+  options: CliOptions,
+  geminiSpinner: ReturnType<typeof spinner.start>
+): Promise<HouseConfig> => {
   const apiKey = Bun.env.GEMINI_API_KEY;
   if (!apiKey) {
     throw new Error("Missing GEMINI_API_KEY in the environment.");
@@ -437,12 +481,12 @@ const buildHouseConfig = async (listing: RightmoveListing, options: CliOptions):
     },
   ];
 
-  console.log("Fetching listing images for Gemini...");
-  const floorplanParts = await buildInlineImageParts(floorplans, "floorplan");
-  const photoParts = await buildInlineImageParts(photos, "photo");
+  geminiSpinner.text = "Fetching listing images...";
+  const floorplanParts = await buildInlineImageParts(floorplans);
+  const photoParts = await buildInlineImageParts(photos);
   parts.push(...floorplanParts, ...photoParts);
 
-  console.log("Sending request to Gemini...");
+  geminiSpinner.text = `Sending request to ${colors.highlight(options.model)}...`;
   const response = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${options.model}:generateContent?key=${apiKey}`,
     {
@@ -475,10 +519,7 @@ const buildHouseConfig = async (listing: RightmoveListing, options: CliOptions):
   return jsonPayload as HouseConfig;
 };
 
-const buildInlineImageParts = async (
-  urls: string[],
-  label: string
-): Promise<GeminiInlinePart[]> => {
+const buildInlineImageParts = async (urls: string[]): Promise<GeminiInlinePart[]> => {
   const parts: GeminiInlinePart[] = [];
   for (const url of urls) {
     try {
@@ -495,7 +536,7 @@ const buildInlineImageParts = async (
         },
       });
     } catch (error) {
-      console.warn(`Skipping ${label} image ${url}: ${String(error)}`);
+      log.warn(`Skipping image ${colors.dim(url)}: ${String(error)}`);
     }
   }
   return parts;
@@ -564,7 +605,7 @@ const trimToLength = (value: string, maxLength: number): string => {
   if (value.length <= maxLength) {
     return value;
   }
-  return `${value.slice(0, maxLength)}…`;
+  return `${value.slice(0, maxLength)}...`;
 };
 
 const extractGeminiText = (response: GeminiResponse): string => {
@@ -643,4 +684,4 @@ const assertHouseConfig = (house: HouseConfig) => {
 
 const isBedType = (value: unknown): value is BedType => value === "single" || value === "double";
 
-await main();
+main().catch(handleError);

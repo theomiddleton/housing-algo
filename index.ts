@@ -1,5 +1,19 @@
 import { createInterface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
+import prompts from "prompts";
+import { GoogleGenAI, type Content, type Part } from "@google/genai";
+import {
+  colors,
+  symbols,
+  log,
+  spinner,
+  formatHelp,
+  parseArgs as createArgParser,
+  resolvePath,
+  handleError,
+  box,
+  readJson,
+} from "./cli";
 
 type BedType = "single" | "double";
 
@@ -127,7 +141,7 @@ type ScoreResult = {
   reasons?: string[][];
 };
 
-type ScoringMode = "deterministic" | "ai" | "gemini";
+type ScoringMode = "deterministic" | "gemini";
 
 type GeminiAttachment = {
   name: string;
@@ -141,34 +155,6 @@ type GeminiInput = {
   data: GeminiAttachment[];
   webpages: string[];
   images: GeminiAttachment[];
-};
-
-type GeminiTextPart = {
-  text: string;
-};
-
-type GeminiInlinePart = {
-  inline_data: {
-    mime_type: string;
-    data: string;
-  };
-};
-
-type GeminiPart = GeminiTextPart | GeminiInlinePart;
-
-type GeminiContent = {
-  role: "user" | "model";
-  parts: GeminiPart[];
-};
-
-type GeminiApiResponse = {
-  candidates?: Array<{
-    content?: {
-      parts?: Array<{
-        text?: string;
-      }>;
-    };
-  }>;
 };
 
 type GeminiScorePayload = {
@@ -189,61 +175,137 @@ type GeminiCliOptions = {
 };
 
 type AiOptions = {
-  mode: Exclude<ScoringMode, "deterministic">;
   gemini: GeminiCliOptions;
 };
 
 type CliOptions = {
-  housePath: string;
-  peoplePath: string;
-  mode: ScoringMode;
+  housePath?: string;
+  peoplePath?: string;
+  mode?: ScoringMode;
   json: boolean;
   help: boolean;
   gemini: GeminiCliOptions;
 };
 
-const DEFAULT_HOUSE_PATH = "data/house.json";
-const DEFAULT_PEOPLE_PATH = "data/people.json";
 const DEFAULT_GEMINI_TIMEOUT_MS = 30000;
 const DEFAULT_GEMINI_RETRIES = 1;
 
 const main = async () => {
-  const options = parseArgs(Bun.argv.slice(2));
+  const options = parseCliArgs(Bun.argv.slice(2));
   if (options.help) {
     printUsage();
     return;
   }
 
-  const houseConfig = await readJson<HouseConfig>(options.housePath);
-  const peopleConfig = await readJson<PeopleConfig>(options.peoplePath);
+  // Prompt for missing required inputs
+  let housePath = options.housePath;
+  let peoplePath = options.peoplePath;
+  let mode = options.mode;
 
-  assertHouseConfig(houseConfig);
-  assertPeopleConfig(peopleConfig);
+  if (!housePath) {
+    const response = await prompts({
+      type: "text",
+      name: "housePath",
+      message: colors.label("Path to house JSON file"),
+      validate: (v) => (v.trim() ? true : "House path is required"),
+    });
+    if (!response.housePath) {
+      log.error("House path is required");
+      process.exit(1);
+    }
+    housePath = response.housePath;
+  }
+
+  if (!peoplePath) {
+    const response = await prompts({
+      type: "text",
+      name: "peoplePath",
+      message: colors.label("Path to people JSON file"),
+      validate: (v) => (v.trim() ? true : "People path is required"),
+    });
+    if (!response.peoplePath) {
+      log.error("People path is required");
+      process.exit(1);
+    }
+    peoplePath = response.peoplePath;
+  }
+
+  if (!mode) {
+    const response = await prompts({
+      type: "select",
+      name: "mode",
+      message: colors.label("Scoring mode"),
+      choices: [
+        { title: "Deterministic (rule-based)", value: "deterministic" },
+        { title: "Gemini (AI)", value: "gemini" },
+      ],
+      initial: 0,
+    });
+    if (!response.mode) {
+      log.error("Mode is required");
+      process.exit(1);
+    }
+    mode = response.mode;
+  }
+
+  const loadSpinner = spinner.start("Loading configuration files...");
+
+  let houseConfig: HouseConfig;
+  let peopleConfig: PeopleConfig;
+
+  try {
+    houseConfig = await readJson<HouseConfig>(housePath!);
+    peopleConfig = await readJson<PeopleConfig>(peoplePath!);
+    assertHouseConfig(houseConfig);
+    assertPeopleConfig(peopleConfig);
+    loadSpinner.succeed("Configuration loaded");
+  } catch (error) {
+    loadSpinner.fail("Failed to load configuration");
+    throw error;
+  }
 
   if (peopleConfig.people.length > houseConfig.rooms.length) {
-    throw new Error("There are more people than rooms. Add rooms or remove people.");
+    throw new Error(
+      "There are more people than rooms. Add rooms or remove people.",
+    );
   }
 
   const roomMetrics = buildRoomMetrics(houseConfig.rooms);
-  const peopleMeta = buildPeopleMeta(peopleConfig.people, peopleConfig.defaults);
+  const peopleMeta = buildPeopleMeta(
+    peopleConfig.people,
+    peopleConfig.defaults,
+  );
 
-  const scoreResult =
-    options.mode === "deterministic"
-      ? ({
-          scores: buildDeterministicScores(
-            peopleConfig.people,
-            houseConfig.rooms,
-            roomMetrics,
-            peopleMeta
-          ),
-        } satisfies ScoreResult)
-      : await buildAiScores(peopleConfig, houseConfig, roomMetrics, peopleMeta, {
-          mode: options.mode,
-          gemini: options.gemini,
-        });
+  let scoreResult: ScoreResult;
+  if (mode === "deterministic") {
+    const calcSpinner = spinner.start("Calculating scores...");
+    scoreResult = {
+      scores: buildDeterministicScores(
+        peopleConfig.people,
+        houseConfig.rooms,
+        roomMetrics,
+        peopleMeta,
+      ),
+    };
+    calcSpinner.succeed("Scores calculated");
+  } else {
+    scoreResult = await buildAiScores(
+      peopleConfig,
+      houseConfig,
+      roomMetrics,
+      peopleMeta,
+      {
+        gemini: options.gemini,
+      },
+    );
+  }
 
   const { scores, reasons } = scoreResult;
-  const { assignment, totalScore } = assignRooms(scores, peopleMeta, houseConfig.rooms);
+  const { assignment, totalScore } = assignRooms(
+    scores,
+    peopleMeta,
+    houseConfig.rooms,
+  );
   const result = assignment.map((roomIndex, personIndex) => {
     const person = peopleConfig.people[personIndex]!;
     const room = houseConfig.rooms[roomIndex]!;
@@ -256,7 +318,10 @@ const main = async () => {
       priorityScore: meta.priorityScore,
       priorityMultiplier: meta.priorityMultiplier,
       reason:
-        reason ?? (options.mode === "deterministic" ? undefined : "No reason provided by AI."),
+        reason ??
+        (mode === "deterministic"
+          ? undefined
+          : "No reason provided by AI."),
     } satisfies Assignment;
   });
 
@@ -265,97 +330,112 @@ const main = async () => {
       JSON.stringify(
         {
           house: houseConfig.name,
-          mode: options.mode,
+          mode: mode,
           totalScore: round(totalScore),
-            assignments: result.map((item) => ({
-              personId: item.person.id,
-              personName: item.person.name,
-              roomId: item.room.id,
-              roomName: item.room.name,
-              score: round(item.score),
-              priorityScore: round(item.priorityScore),
-              priorityMultiplier: round(item.priorityMultiplier),
-              reason: item.reason,
-            })),
-
+          assignments: result.map((item) => ({
+            personId: item.person.id,
+            personName: item.person.name,
+            roomId: item.room.id,
+            roomName: item.room.name,
+            score: round(item.score),
+            priorityScore: round(item.priorityScore),
+            priorityMultiplier: round(item.priorityMultiplier),
+            reason: item.reason,
+          })),
         },
         null,
-        2
-      )
+        2,
+      ),
     );
     return;
   }
 
-  console.log(`Room assignment for ${houseConfig.name}`);
-  console.log(`Mode: ${options.mode}`);
-  console.log(`Total score: ${round(totalScore)}`);
-  console.log("");
+  // Pretty output
+  log.blank();
+  console.log(
+    box(
+      `${colors.title("Room Assignment Results")}\n${colors.dim(houseConfig.name)}`,
+      {
+        padding: 1,
+        borderColor: colors.info,
+      },
+    ),
+  );
+  log.blank();
+
+  log.item("Mode", mode!);
+  log.item("Total Score", colors.highlight(round(totalScore).toString()));
+  log.item("People", peopleConfig.people.length.toString());
+  log.item("Rooms", houseConfig.rooms.length.toString());
+  log.blank();
+
+  console.log(colors.label("  Assignments:"));
+  log.blank();
 
   result.forEach((item) => {
-    const reasonSuffix = item.reason ? `, reason: ${item.reason}` : "";
-    console.log(
-      `- ${item.person.name} -> ${item.room.name} (score: ${round(item.score)}, priority: ${round(
-        item.priorityScore
-      )}, multiplier: ${round(item.priorityMultiplier)}${reasonSuffix})`
-    );
+    const scoreInfo = `score: ${colors.success(round(item.score).toString())}, priority: ${round(item.priorityScore)}, x${round(item.priorityMultiplier)}`;
+    log.assignment(item.person.name, item.room.name, scoreInfo);
+    if (item.reason) {
+      console.log(`      ${colors.dim(item.reason)}`);
+    }
   });
 
   const unassignedRooms = houseConfig.rooms.filter(
-    (_, index) => !assignment.includes(index)
+    (_, index) => !assignment.includes(index),
   );
 
   if (unassignedRooms.length > 0) {
-    console.log("");
-    console.log("Unassigned rooms:");
+    log.blank();
+    log.warn(`${unassignedRooms.length} unassigned room(s):`);
     unassignedRooms.forEach((room) => {
-      console.log(`- ${room.name}`);
+      console.log(`    ${symbols.bullet} ${colors.dim(room.name)}`);
     });
   }
+
+  log.blank();
+  log.success("Assignment complete!");
+  log.blank();
 };
 
-const parseArgs = (args: string[]): CliOptions => {
-  const getFlagValues = (flag: string): string[] => {
-    const values: string[] = [];
-    for (let index = 0; index < args.length; index++) {
-      if (args[index] !== flag) {
-        continue;
-      }
-      const value = args[index + 1];
-      if (!value || value.startsWith("--")) {
-        throw new Error(`Missing value for ${flag}.`);
-      }
-      values.push(value);
-    }
-    return values;
-  };
-
-  const getFlagValue = (flag: string): string | undefined => {
-    const values = getFlagValues(flag);
-    return values.length > 0 ? values[values.length - 1] : undefined;
-  };
+const parseCliArgs = (args: string[]): CliOptions => {
+  const {
+    getFlagValues,
+    getFlagValue,
+    hasFlag,
+    parsePositiveInt,
+    parseNonNegativeInt,
+  } = createArgParser(args);
 
   const modeRaw = getFlagValue("--mode");
   const geminiQuestions = args.includes("--gemini-questions");
-  const mode: ScoringMode = modeRaw
-    ? modeRaw === "ai" || modeRaw === "gemini"
-      ? modeRaw
-      : "deterministic"
-    : geminiQuestions
-    ? "gemini"
-    : "deterministic";
 
-  if (modeRaw && modeRaw !== "ai" && modeRaw !== "deterministic" && modeRaw !== "gemini") {
-    throw new Error(`Unknown mode: ${modeRaw}. Use --mode deterministic|ai|gemini.`);
+  let mode: ScoringMode | undefined;
+  if (modeRaw) {
+    if (modeRaw === "gemini") {
+      mode = modeRaw;
+    } else if (modeRaw === "deterministic") {
+      mode = "deterministic";
+    } else {
+      throw new Error(
+        `Unknown mode: ${modeRaw}. Use --mode deterministic|gemini.`,
+      );
+    }
+  } else if (geminiQuestions) {
+    mode = "gemini";
   }
 
   const timeoutRaw = getFlagValue("--gemini-timeout");
-  const timeoutMs = timeoutRaw ? parsePositiveInt(timeoutRaw, "--gemini-timeout") : undefined;
+  const timeoutMs = timeoutRaw
+    ? parsePositiveInt(timeoutRaw, "--gemini-timeout")
+    : undefined;
   const retriesRaw = getFlagValue("--gemini-retries");
-  const retries = retriesRaw ? parseNonNegativeInt(retriesRaw, "--gemini-retries") : undefined;
+  const retries = retriesRaw
+    ? parseNonNegativeInt(retriesRaw, "--gemini-retries")
+    : undefined;
 
   return {
-    housePath: getFlagValue("--house") ?? DEFAULT_HOUSE_PATH,
-    peoplePath: getFlagValue("--people") ?? DEFAULT_PEOPLE_PATH,
+    housePath: getFlagValue("--house"),
+    peoplePath: getFlagValue("--people"),
     mode,
     json: args.includes("--json"),
     help: args.includes("--help") || args.includes("-h"),
@@ -373,54 +453,76 @@ const parseArgs = (args: string[]): CliOptions => {
 };
 
 const printUsage = () => {
-  console.log("Room assignment CLI");
-  console.log("");
-  console.log("Usage:");
-  console.log("  bun run index.ts --house data/house.json --people data/people.json");
-  console.log("");
-  console.log("Options:");
-  console.log("  --mode deterministic|ai|gemini  Scoring strategy (default: deterministic)");
-  console.log("  --json                          Output JSON for integrations");
-  console.log("  --house <path>                  House/room JSON file");
-  console.log("  --people <path>                 People/weights JSON file");
-  console.log("  --gemini-model <name>           Gemini model identifier");
-  console.log("  --gemini-data <path>            Attach data file (repeatable)");
-  console.log("  --gemini-webpage <url>          Attach webpage URL (repeatable)");
-  console.log("  --gemini-image <path>           Attach image file (repeatable)");
-  console.log("  --gemini-questions              Let Gemini ask clarifying questions");
-  console.log("  --gemini-timeout <ms>           Timeout per Gemini request (default: 30000)");
-  console.log("  --gemini-retries <count>        Retry count after timeouts (default: 1)");
-  console.log("  --gemini-debug                  Verbose Gemini request logging");
-  console.log("  --help, -h                      Show this help");
-};
-
-const resolvePath = (filePath: string): string =>
-  filePath.startsWith("/") ? filePath : `${process.cwd()}/${filePath}`;
-
-const parsePositiveInt = (value: string, label: string): number => {
-  const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed <= 0) {
-    throw new Error(`Invalid ${label} value: ${value}. Expected a positive whole number.`);
-  }
-  return parsed;
-};
-
-const parseNonNegativeInt = (value: string, label: string): number => {
-  const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed < 0) {
-    throw new Error(`Invalid ${label} value: ${value}. Expected a non-negative whole number.`);
-  }
-  return parsed;
-};
-
-const readJson = async <T,>(filePath: string): Promise<T> => {
-  const resolved = resolvePath(filePath);
-  const file = Bun.file(resolved);
-  if (!(await file.exists())) {
-    throw new Error(`File not found: ${resolved}`);
-  }
-  const text = await file.text();
-  return JSON.parse(text) as T;
+  console.log(
+    formatHelp({
+      name: "Room Assignment CLI",
+      description:
+        "Optimally assign rooms to people based on preferences and priorities",
+      usage: "bun run index.ts [options]",
+      options: [
+        { flag: "--house <path>", description: "House/room JSON file" },
+        { flag: "--people <path>", description: "People/weights JSON file" },
+        {
+          flag: "--mode <mode>",
+          description: "Scoring strategy: deterministic | gemini",
+        },
+        { flag: "--json", description: "Output JSON for integrations" },
+        {
+          flag: "--gemini-model <name>",
+          description: "Gemini model identifier",
+        },
+        {
+          flag: "--gemini-data <path>",
+          description: "Attach data file (repeatable)",
+        },
+        {
+          flag: "--gemini-webpage <url>",
+          description: "Attach webpage URL (repeatable)",
+        },
+        {
+          flag: "--gemini-image <path>",
+          description: "Attach image file (repeatable)",
+        },
+        {
+          flag: "--gemini-questions",
+          description: "Let Gemini ask clarifying questions",
+        },
+        {
+          flag: "--gemini-timeout <ms>",
+          description: "Timeout per Gemini request",
+          default: "30000",
+        },
+        {
+          flag: "--gemini-retries <n>",
+          description: "Retry count after timeouts",
+          default: "1",
+        },
+        {
+          flag: "--gemini-debug",
+          description: "Verbose Gemini request logging",
+        },
+        { flag: "--help, -h", description: "Show this help" },
+      ],
+      sections: [
+        {
+          title: "Examples:",
+          content: [
+            colors.command(
+              "bun run index.ts --house data/house.json --people data/people.json",
+            ),
+            colors.command("bun run index.ts --mode gemini --gemini-questions"),
+            colors.command("bun run index.ts --json"),
+          ],
+        },
+        {
+          title: "Note:",
+          content: [
+            "If paths are not provided, you will be prompted to enter them.",
+          ],
+        },
+      ],
+    }),
+  );
 };
 
 const isTextMime = (mimeType: string): boolean => {
@@ -435,12 +537,14 @@ const isTextMime = (mimeType: string): boolean => {
 
 const getFileName = (filePath: string): string => {
   const segments = filePath.split("/");
-  return segments.length > 0 ? (segments[segments.length - 1] ?? filePath) : filePath;
+  return segments.length > 0
+    ? (segments[segments.length - 1] ?? filePath)
+    : filePath;
 };
 
 const readGeminiAttachment = async (
   filePath: string,
-  options: { defaultMimeType: string; forceBase64?: boolean }
+  options: { defaultMimeType: string; forceBase64?: boolean },
 ): Promise<GeminiAttachment> => {
   const resolved = resolvePath(filePath);
   const file = Bun.file(resolved);
@@ -469,13 +573,15 @@ const readGeminiAttachment = async (
   };
 };
 
-const buildGeminiPayload = async (options: GeminiCliOptions): Promise<GeminiInput> => {
+const buildGeminiPayload = async (
+  options: GeminiCliOptions,
+): Promise<GeminiInput> => {
   const data = await Promise.all(
     options.dataPaths.map((path) =>
       readGeminiAttachment(path, {
         defaultMimeType: "text/plain",
-      })
-    )
+      }),
+    ),
   );
 
   const images = await Promise.all(
@@ -483,8 +589,8 @@ const buildGeminiPayload = async (options: GeminiCliOptions): Promise<GeminiInpu
       readGeminiAttachment(path, {
         defaultMimeType: "application/octet-stream",
         forceBase64: true,
-      })
-    )
+      }),
+    ),
   );
 
   return {
@@ -499,13 +605,16 @@ const buildGeminiPrompt = (
   peopleConfig: PeopleConfig,
   houseConfig: HouseConfig,
   gemini: GeminiInput,
-  allowQuestions: boolean
+  allowQuestions: boolean,
 ): string => {
-  const roomOrder = houseConfig.rooms.map((room) => `${room.id} (${room.name})`).join(", ");
+  const roomOrder = houseConfig.rooms
+    .map((room) => `${room.id} (${room.name})`)
+    .join(", ");
   const peopleOrder = peopleConfig.people
     .map((person) => `${person.id} (${person.name})`)
     .join(", ");
-  const webpages = gemini.webpages.length > 0 ? gemini.webpages.join("\n") : "(none)";
+  const webpages =
+    gemini.webpages.length > 0 ? gemini.webpages.join("\n") : "(none)";
 
   const questionInstructions = allowQuestions
     ? [
@@ -545,8 +654,11 @@ const buildGeminiPrompt = (
   ].join("\n");
 };
 
-const buildGeminiParts = (prompt: string, gemini: GeminiInput): GeminiPart[] => {
-  const parts: GeminiPart[] = [{ text: prompt }];
+const buildGeminiParts = (
+  prompt: string,
+  gemini: GeminiInput,
+): Part[] => {
+  const parts: Part[] = [{ text: prompt }];
 
   gemini.webpages.forEach((url) => {
     parts.push({ text: `Webpage: ${url}` });
@@ -560,8 +672,8 @@ const buildGeminiParts = (prompt: string, gemini: GeminiInput): GeminiPart[] => 
       return;
     }
     parts.push({
-      inline_data: {
-        mime_type: attachment.mimeType,
+      inlineData: {
+        mimeType: attachment.mimeType,
         data: attachment.content,
       },
     });
@@ -570,8 +682,8 @@ const buildGeminiParts = (prompt: string, gemini: GeminiInput): GeminiPart[] => 
   gemini.images.forEach((image) => {
     parts.push({ text: `Image: ${image.name}` });
     parts.push({
-      inline_data: {
-        mime_type: image.mimeType,
+      inlineData: {
+        mimeType: image.mimeType,
         data: image.content,
       },
     });
@@ -581,64 +693,52 @@ const buildGeminiParts = (prompt: string, gemini: GeminiInput): GeminiPart[] => 
 };
 
 const requestGemini = async (
-  apiKey: string,
+  client: GoogleGenAI,
   model: string,
-  contents: GeminiContent[],
-  options: { timeoutMs: number; debug: boolean; round: number; maxRounds: number }
-): Promise<GeminiApiResponse> => {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), options.timeoutMs);
-
+  contents: Content[],
+  options: {
+    timeoutMs: number;
+    debug: boolean;
+    round: number;
+    maxRounds: number;
+  },
+): Promise<string> => {
   if (options.debug) {
-    console.log(
-      `Gemini request: model=${model}, timeout=${options.timeoutMs}ms, round=${options.round}/${options.maxRounds}`
+    log.info(
+      `Request: model=${colors.highlight(model)}, timeout=${options.timeoutMs}ms, round=${options.round}/${options.maxRounds}`,
     );
   }
 
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), options.timeoutMs);
+
   try {
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
+    const response = await client.models.generateContent({
+      model,
+      contents,
+      config: {
+        temperature: 0.2,
+        responseMimeType: "application/json",
+        abortSignal: controller.signal,
       },
-      body: JSON.stringify({
-        contents,
-        generationConfig: {
-          temperature: 0.2,
-          responseMimeType: "application/json",
-        },
-      }),
-      signal: controller.signal,
     });
 
-    if (!response.ok) {
-      const errorBody = options.debug ? await response.text() : undefined;
-      if (options.debug && errorBody) {
-        console.log(`Gemini error response: ${errorBody}`);
-      }
-      throw new Error(`Gemini request failed: ${response.status} ${response.statusText}`);
+    const text = response.text?.trim() ?? "";
+    if (!text) {
+      throw new Error("Gemini response did not include text content.");
     }
-
-    return (await response.json()) as GeminiApiResponse;
+    return text;
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") {
       throw new Error(`Gemini request timed out after ${options.timeoutMs}ms.`);
+    }
+    if (options.debug && error instanceof Error) {
+      log.error(`Gemini error: ${error.message}`);
     }
     throw error;
   } finally {
     clearTimeout(timer);
   }
-};
-
-const extractGeminiText = (response: GeminiApiResponse): string => {
-  const candidate = response.candidates?.[0];
-  const parts = candidate?.content?.parts ?? [];
-  const text = parts.map((part) => part.text ?? "").join("\n").trim();
-  if (!text) {
-    throw new Error("Gemini response did not include text content.");
-  }
-  return text;
 };
 
 const parseGeminiScorePayload = (text: string): GeminiScorePayload => {
@@ -652,7 +752,9 @@ const parseGeminiScorePayload = (text: string): GeminiScorePayload => {
 const parseJsonFromText = (text: string): unknown => {
   const trimmed = text.trim();
   if (trimmed.startsWith("```")) {
-    const withoutFence = trimmed.replace(/^```(?:json)?\n?/i, "").replace(/```$/i, "");
+    const withoutFence = trimmed
+      .replace(/^```(?:json)?\n?/i, "")
+      .replace(/```$/i, "");
     return parseJsonFromText(withoutFence);
   }
 
@@ -724,7 +826,7 @@ const extractJsonBlock = (text: string, startIndex: number): string | null => {
 const normalizeGeminiScores = (
   scores: number[][],
   peopleCount: number,
-  roomCount: number
+  roomCount: number,
 ): number[][] => {
   if (!Array.isArray(scores) || scores.length !== peopleCount) {
     throw new Error("Gemini scores must include one row per person.");
@@ -732,12 +834,16 @@ const normalizeGeminiScores = (
 
   return scores.map((row, rowIndex) => {
     if (!Array.isArray(row) || row.length !== roomCount) {
-      throw new Error(`Gemini scores row ${rowIndex + 1} must have ${roomCount} entries.`);
+      throw new Error(
+        `Gemini scores row ${rowIndex + 1} must have ${roomCount} entries.`,
+      );
     }
     return row.map((value, colIndex) => {
       const numeric = typeof value === "number" ? value : Number(value);
       if (!Number.isFinite(numeric)) {
-        throw new Error(`Gemini score at [${rowIndex + 1}, ${colIndex + 1}] is not numeric.`);
+        throw new Error(
+          `Gemini score at [${rowIndex + 1}, ${colIndex + 1}] is not numeric.`,
+        );
       }
       return numeric;
     });
@@ -747,7 +853,7 @@ const normalizeGeminiScores = (
 const normalizeReasons = (
   reasons: unknown,
   peopleCount: number,
-  roomCount: number
+  roomCount: number,
 ): string[][] | undefined => {
   if (!Array.isArray(reasons)) {
     return undefined;
@@ -759,11 +865,15 @@ const normalizeReasons = (
 
   return reasons.map((row, rowIndex) => {
     if (!Array.isArray(row) || row.length !== roomCount) {
-      throw new Error(`Reasons row ${rowIndex + 1} must have ${roomCount} entries.`);
+      throw new Error(
+        `Reasons row ${rowIndex + 1} must have ${roomCount} entries.`,
+      );
     }
     return row.map((value, colIndex) => {
       if (typeof value !== "string") {
-        throw new Error(`Reason at [${rowIndex + 1}, ${colIndex + 1}] must be text.`);
+        throw new Error(
+          `Reason at [${rowIndex + 1}, ${colIndex + 1}] must be text.`,
+        );
       }
       return value.trim();
     });
@@ -772,16 +882,20 @@ const normalizeReasons = (
 
 const promptGeminiQuestions = async (
   reader: ReturnType<typeof createInterface> | null,
-  questions: string[]
+  questions: string[],
 ): Promise<string[]> => {
   if (!reader) {
-    throw new Error("Gemini follow-up questions require an interactive terminal.");
+    throw new Error(
+      "Gemini follow-up questions require an interactive terminal.",
+    );
   }
 
   const answers: string[] = [];
   for (const question of questions) {
     if (!reader.terminal) {
-      throw new Error("Gemini follow-up questions require an interactive terminal.");
+      throw new Error(
+        "Gemini follow-up questions require an interactive terminal.",
+      );
     }
     const answer = await reader.question(`Gemini asks: ${question}\n> `);
     answers.push(answer.trim());
@@ -789,7 +903,10 @@ const promptGeminiQuestions = async (
   return answers;
 };
 
-const formatGeminiAnswers = (questions: string[], answers: string[]): string => {
+const formatGeminiAnswers = (
+  questions: string[],
+  answers: string[],
+): string => {
   const lines = ["Answers to your questions:"];
   questions.forEach((question, index) => {
     lines.push(`Q: ${question}`);
@@ -837,20 +954,25 @@ const isBedType = (value: unknown): value is BedType =>
   value === "single" || value === "double";
 
 const isGender = (value: unknown): value is Gender =>
-  value === "female" || value === "male" || value === "nonbinary" || value === "other";
+  value === "female" ||
+  value === "male" ||
+  value === "nonbinary" ||
+  value === "other";
 
 const isRelationship = (value: unknown): value is Relationship => {
   if (!value || typeof value !== "object") {
     return false;
   }
   const relationship = value as Relationship;
-  const validStatus = relationship.status === "single" || relationship.status === "partnered";
+  const validStatus =
+    relationship.status === "single" || relationship.status === "partnered";
   const validPartnerLocation =
     relationship.partnerLocation === "none" ||
     relationship.partnerLocation === "external" ||
     relationship.partnerLocation === "house";
   const validPartnerId =
-    relationship.partnerId === undefined || typeof relationship.partnerId === "string";
+    relationship.partnerId === undefined ||
+    typeof relationship.partnerId === "string";
   return validStatus && validPartnerLocation && validPartnerId;
 };
 
@@ -894,10 +1016,19 @@ const normalizeValues = (values: number[]): number[] => {
   return values.map((value) => (value - min) / (max - min));
 };
 
-const buildPeopleMeta = (people: Person[], defaults: PersonDefaults): PersonMeta[] => {
+const buildPeopleMeta = (
+  people: Person[],
+  defaults: PersonDefaults,
+): PersonMeta[] => {
   return people.map((person) => {
-    const preferenceWeights = mergeWeights(defaults.preferenceWeights, person.preferenceWeights);
-    const priorityWeights = mergeWeights(defaults.priorityWeights, person.priorityWeights);
+    const preferenceWeights = mergeWeights(
+      defaults.preferenceWeights,
+      person.preferenceWeights,
+    );
+    const priorityWeights = mergeWeights(
+      defaults.priorityWeights,
+      person.priorityWeights,
+    );
     const priorityScore = calculatePriorityScore(person, priorityWeights);
     const priorityMultiplier = 1 + priorityScore / defaults.priorityScale;
     return {
@@ -907,8 +1038,10 @@ const buildPeopleMeta = (people: Person[], defaults: PersonDefaults): PersonMeta
       priorityMultiplier,
       safetyConcern: person.safetyConcern ?? defaults.safetyConcern,
       bedUpgradeWeight: person.bedUpgradeWeight ?? defaults.bedUpgradeWeight,
-      bedDowngradePenalty: person.bedDowngradePenalty ?? defaults.bedDowngradePenalty,
-      doubleBedPartnerWeight: person.doubleBedPartnerWeight ?? defaults.doubleBedPartnerWeight,
+      bedDowngradePenalty:
+        person.bedDowngradePenalty ?? defaults.bedDowngradePenalty,
+      doubleBedPartnerWeight:
+        person.doubleBedPartnerWeight ?? defaults.doubleBedPartnerWeight,
       safetySensitiveGenders: defaults.safetySensitiveGenders,
     };
   });
@@ -916,7 +1049,7 @@ const buildPeopleMeta = (people: Person[], defaults: PersonDefaults): PersonMeta
 
 const mergeWeights = <T extends Record<string, number>>(
   defaults: T,
-  overrides?: Partial<T>
+  overrides?: Partial<T>,
 ): T => {
   return {
     ...defaults,
@@ -924,7 +1057,10 @@ const mergeWeights = <T extends Record<string, number>>(
   };
 };
 
-const calculatePriorityScore = (person: Person, weights: PriorityWeights): number => {
+const calculatePriorityScore = (
+  person: Person,
+  weights: PriorityWeights,
+): number => {
   return (
     (person.foundHouse ? weights.foundHouse : 0) +
     (person.handledAgent ? weights.handledAgent : 0) +
@@ -936,7 +1072,7 @@ const buildDeterministicScores = (
   people: Person[],
   rooms: Room[],
   roomMetrics: RoomMetrics[],
-  peopleMeta: PersonMeta[]
+  peopleMeta: PersonMeta[],
 ): number[][] => {
   return people.map((person, personIndex) => {
     return rooms.map((room, roomIndex) => {
@@ -944,7 +1080,7 @@ const buildDeterministicScores = (
         person,
         room,
         roomMetrics[roomIndex]!,
-        peopleMeta[personIndex]!
+        peopleMeta[personIndex]!,
       );
     });
   });
@@ -953,162 +1089,145 @@ const buildDeterministicScores = (
 const buildAiScores = async (
   peopleConfig: PeopleConfig,
   houseConfig: HouseConfig,
-  roomMetrics: RoomMetrics[],
-  peopleMeta: PersonMeta[],
-  aiOptions: AiOptions
+  _roomMetrics: RoomMetrics[],
+  _peopleMeta: PersonMeta[],
+  aiOptions: AiOptions,
 ): Promise<ScoreResult> => {
-  if (aiOptions.mode === "ai") {
-    return buildDeciderScores(
-      peopleConfig,
-      houseConfig,
-      roomMetrics,
-      peopleMeta,
-      aiOptions.gemini
-    );
-  }
-
   return buildGeminiScores(peopleConfig, houseConfig, aiOptions.gemini);
-};
-
-const buildDeciderScores = async (
-  peopleConfig: PeopleConfig,
-  houseConfig: HouseConfig,
-  roomMetrics: RoomMetrics[],
-  peopleMeta: PersonMeta[],
-  geminiOptions: GeminiCliOptions
-): Promise<ScoreResult> => {
-  const endpoint = Bun.env.AI_DECIDER_URL;
-  if (!endpoint) {
-    throw new Error("AI mode requires AI_DECIDER_URL in the environment.");
-  }
-
-  const gemini = await buildGeminiPayload(geminiOptions);
-
-  console.log("Requesting AI scores from the decider...");
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      house: houseConfig,
-      people: peopleConfig,
-      roomMetrics,
-      peopleMeta,
-      mode: "ai",
-      gemini,
-    }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`AI decider failed: ${response.status} ${response.statusText}`);
-  }
-
-  const data = (await response.json()) as { scores: number[][]; reasons?: string[][] };
-  if (!data.scores || !Array.isArray(data.scores)) {
-    throw new Error("AI decider response must include scores matrix.");
-  }
-
-  const scores = data.scores;
-  const reasons = normalizeReasons(
-    data.reasons,
-    peopleConfig.people.length,
-    houseConfig.rooms.length
-  );
-
-  if (!reasons) {
-    console.warn("AI decider did not provide reasons.");
-  }
-
-  return { scores, reasons };
 };
 
 const buildGeminiScores = async (
   peopleConfig: PeopleConfig,
   houseConfig: HouseConfig,
-  geminiOptions: GeminiCliOptions
+  geminiOptions: GeminiCliOptions,
 ): Promise<ScoreResult> => {
   const apiKey = Bun.env.GEMINI_API_KEY;
   if (!apiKey) {
     throw new Error("Gemini mode requires GEMINI_API_KEY in the environment.");
   }
 
-  const model = geminiOptions.model ?? Bun.env.GEMINI_MODEL ?? "gemini-1.5-flash";
+  const client = new GoogleGenAI({ apiKey });
+  const model =
+    geminiOptions.model ?? Bun.env.GEMINI_MODEL ?? "gemini-2.0-flash";
   const gemini = await buildGeminiPayload(geminiOptions);
-  const prompt = buildGeminiPrompt(peopleConfig, houseConfig, gemini, geminiOptions.allowQuestions);
+  const prompt = buildGeminiPrompt(
+    peopleConfig,
+    houseConfig,
+    gemini,
+    geminiOptions.allowQuestions,
+  );
   if (geminiOptions.debug) {
-    console.log(`Gemini prompt chars: ${prompt.length}`);
-    console.log(
-      `Gemini attachments: data=${gemini.data.length}, images=${gemini.images.length}, webpages=${gemini.webpages.length}`
+    log.info(`Model: ${colors.highlight(model)}`);
+    log.info(`Prompt: ${prompt.length} chars`);
+    log.info(
+      `Attachments: data=${gemini.data.length}, images=${gemini.images.length}, webpages=${gemini.webpages.length}`,
     );
     if (gemini.data.length > 0) {
-      const dataNames = gemini.data.map((item) => `${item.name} (${item.mimeType}, ${item.encoding})`);
-      console.log(`Gemini data files: ${dataNames.join(", ")}`);
+      const dataNames = gemini.data.map(
+        (item) => `${item.name} (${item.mimeType}, ${item.encoding})`,
+      );
+      log.info(`Data files: ${dataNames.join(", ")}`);
     }
     if (gemini.images.length > 0) {
-      const imageNames = gemini.images.map((item) => `${item.name} (${item.mimeType})`);
-      console.log(`Gemini images: ${imageNames.join(", ")}`);
+      const imageNames = gemini.images.map(
+        (item) => `${item.name} (${item.mimeType})`,
+      );
+      log.info(`Images: ${imageNames.join(", ")}`);
     }
+    log.blank();
+    log.info("Full prompt being sent to Gemini:");
+    console.log(colors.dim("─".repeat(60)));
+    console.log(prompt);
+    console.log(colors.dim("─".repeat(60)));
+    log.blank();
   }
-  const contents: GeminiContent[] = [
+  const contents: Content[] = [
     {
       role: "user",
       parts: buildGeminiParts(prompt, gemini),
     },
   ];
 
-  const reader = geminiOptions.allowQuestions ? createInterface({ input, output }) : null;
+  const reader = geminiOptions.allowQuestions
+    ? createInterface({ input, output })
+    : null;
   const maxRounds = geminiOptions.allowQuestions ? 3 : 1;
   const timeoutMs = geminiOptions.timeoutMs ?? DEFAULT_GEMINI_TIMEOUT_MS;
-  const partsCount = contents[0]?.parts.length ?? 0;
+  const partsCount = contents[0]?.parts?.length ?? 0;
   if (geminiOptions.debug) {
-    console.log(
-      `Gemini request payload: parts=${partsCount}, allowQuestions=${geminiOptions.allowQuestions}, retries=${geminiOptions.retries}, timeoutMs=${timeoutMs}`
+    log.info(
+      `Payload: parts=${partsCount}, allowQuestions=${geminiOptions.allowQuestions}, retries=${geminiOptions.retries}, timeout=${timeoutMs}ms`,
     );
   }
+
+  const geminiSpinner = spinner.create("Requesting Gemini scores...");
 
   try {
     for (let round = 0; round < maxRounds; round += 1) {
       const attemptMax = Math.max(0, geminiOptions.retries);
       for (let attempt = 0; attempt <= attemptMax; attempt += 1) {
-        console.log(`Gemini scoring (round ${round + 1}/${maxRounds})...`);
+        geminiSpinner.start();
+        geminiSpinner.text = `Gemini scoring (round ${round + 1}/${maxRounds})...`;
         try {
-          const response = await requestGemini(apiKey, model, contents, {
+          const responseText = await requestGemini(client, model, contents, {
             timeoutMs,
             debug: geminiOptions.debug,
             round: round + 1,
             maxRounds,
           });
-          const responseText = extractGeminiText(response);
+          
+          if (geminiOptions.debug) {
+            geminiSpinner.stop();
+            log.info("Gemini response text:");
+            console.log(responseText);
+          }
+          
           const payload = parseGeminiScorePayload(responseText);
+          
+          if (geminiOptions.debug) {
+            log.info("Parsed payload:");
+            console.log(JSON.stringify(payload, null, 2));
+          }
 
           if (payload.scores) {
             const scores = normalizeGeminiScores(
               payload.scores,
               peopleConfig.people.length,
-              houseConfig.rooms.length
+              houseConfig.rooms.length,
             );
             const reasons = normalizeReasons(
               payload.reasons,
               peopleConfig.people.length,
-              houseConfig.rooms.length
+              houseConfig.rooms.length,
             );
             if (!reasons) {
-              throw new Error("Gemini response must include reasons for each score.");
+              geminiSpinner.fail("Gemini response missing reasons");
+              throw new Error(
+                "Gemini response must include reasons for each score.",
+              );
             }
+            geminiSpinner.succeed("Gemini scores received");
             return { scores, reasons };
           }
 
           if (!geminiOptions.allowQuestions) {
+            geminiSpinner.fail("Gemini did not return scores");
             throw new Error("Gemini did not return scores.");
           }
 
-          if (!Array.isArray(payload.questions) || payload.questions.length === 0) {
+          if (
+            !Array.isArray(payload.questions) ||
+            payload.questions.length === 0
+          ) {
+            geminiSpinner.fail("Gemini did not return questions or scores");
             throw new Error("Gemini did not return questions or scores.");
           }
 
-          console.log("Gemini asked follow-up questions.");
-          const answers = await promptGeminiQuestions(reader, payload.questions);
+          geminiSpinner.info("Gemini has follow-up questions");
+          const answers = await promptGeminiQuestions(
+            reader,
+            payload.questions,
+          );
           contents.push({
             role: "model",
             parts: [{ text: responseText }],
@@ -1119,11 +1238,15 @@ const buildGeminiScores = async (
           });
           break;
         } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
+          const message =
+            error instanceof Error ? error.message : String(error);
           if (!message.includes("timed out") || attempt >= attemptMax) {
+            geminiSpinner.fail("Gemini request failed");
             throw error;
           }
-          console.warn(`Gemini request timed out (attempt ${attempt + 1}/${attemptMax + 1}). Retrying...`);
+          geminiSpinner.warn(
+            `Timed out (attempt ${attempt + 1}/${attemptMax + 1}). Retrying...`,
+          );
         }
       }
     }
@@ -1131,6 +1254,7 @@ const buildGeminiScores = async (
     reader?.close();
   }
 
+  geminiSpinner.fail("Gemini did not return scores");
   throw new Error("Gemini did not return scores after follow-up questions.");
 };
 
@@ -1138,7 +1262,7 @@ const scoreRoom = (
   person: Person,
   room: Room,
   metrics: RoomMetrics,
-  meta: PersonMeta
+  meta: PersonMeta,
 ): number => {
   let score = 0;
   score += metrics.size * meta.preferenceWeights.size;
@@ -1165,12 +1289,14 @@ const scoreRoom = (
     score -= meta.bedDowngradePenalty;
   }
 
-  if (person.relationship.status === "partnered" && person.relationship.partnerLocation === "external") {
+  if (
+    person.relationship.status === "partnered" &&
+    person.relationship.partnerLocation === "external"
+  ) {
     if (room.bedType === "double") {
       score += meta.doubleBedPartnerWeight;
     }
   }
-
 
   if (metrics.isFrontGround && personNeedsSafetyPenalty(person, meta)) {
     score -= meta.safetyConcern;
@@ -1179,14 +1305,20 @@ const scoreRoom = (
   return score * meta.priorityMultiplier;
 };
 
-const personNeedsSafetyPenalty = (person: Person, meta: PersonMeta): boolean => {
-  return meta.safetyConcern > 0 && meta.safetySensitiveGenders.includes(person.gender);
+const personNeedsSafetyPenalty = (
+  person: Person,
+  meta: PersonMeta,
+): boolean => {
+  return (
+    meta.safetyConcern > 0 &&
+    meta.safetySensitiveGenders.includes(person.gender)
+  );
 };
 
 const assignRooms = (
   scores: number[][],
   peopleMeta: PersonMeta[],
-  rooms: Room[]
+  rooms: Room[],
 ): { assignment: number[]; totalScore: number } => {
   const peopleCount = scores.length;
   const roomsCount = rooms.length;
@@ -1211,7 +1343,9 @@ const assignRooms = (
         continue;
       }
       const nextMask = mask | (1 << roomIndex);
-      const nextScore = (dp[mask] ?? Number.NEGATIVE_INFINITY) + scores[personIndex]![roomIndex]!;
+      const nextScore =
+        (dp[mask] ?? Number.NEGATIVE_INFINITY) +
+        scores[personIndex]![roomIndex]!;
       if (nextScore > (dp[nextMask] ?? Number.NEGATIVE_INFINITY)) {
         dp[nextMask] = nextScore;
         prev[nextMask] = mask;
@@ -1258,10 +1392,13 @@ const assignRooms = (
 const greedyAssignment = (
   scores: number[][],
   peopleMeta: PersonMeta[],
-  roomsCount: number
+  roomsCount: number,
 ): { assignment: number[]; totalScore: number } => {
   const peopleOrder = scores
-    .map((_, index) => ({ index, priority: peopleMeta[index]!.priorityMultiplier }))
+    .map((_, index) => ({
+      index,
+      priority: peopleMeta[index]!.priorityMultiplier,
+    }))
     .sort((a, b) => b.priority - a.priority);
 
   const assignment = new Array<number>(scores.length).fill(-1);
@@ -1304,4 +1441,4 @@ const countBits = (mask: number): number => {
 
 const round = (value: number): number => Math.round(value * 100) / 100;
 
-await main();
+main().catch(handleError);

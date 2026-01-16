@@ -1,5 +1,14 @@
-import { createInterface } from "node:readline/promises";
-import { stdin as input, stdout as output } from "node:process";
+import prompts from "prompts";
+import {
+  colors,
+  symbols,
+  log,
+  formatHelp,
+  parseArgs as createArgParser,
+  resolvePath,
+  handleError,
+  box,
+} from "./cli";
 
 type BedType = "single" | "double";
 
@@ -68,19 +77,11 @@ type PeopleConfig = {
 };
 
 type CliOptions = {
-  outPath: string;
+  outPath?: string;
   defaultsPath?: string;
   count?: number;
   help: boolean;
 };
-
-type PromptResult<T> = {
-  value: T;
-  usedDefault: boolean;
-};
-
-const DEFAULT_OUT_PATH = "data/people.json";
-const DEFAULT_DEFAULTS_PATH = "data/people.json";
 
 const FALLBACK_DEFAULTS: PersonDefaults = {
   preferenceWeights: {
@@ -126,80 +127,122 @@ const PRIORITY_KEYS: Array<keyof PriorityWeights> = [
 ];
 
 const main = async () => {
-  const options = parseArgs(Bun.argv.slice(2));
+  const options = parseCliArgs(Bun.argv.slice(2));
   if (options.help) {
     printUsage();
     return;
   }
 
+  log.title("Residents Builder");
+
   const defaults = await loadDefaults(options.defaultsPath);
-  const reader = createInterface({ input, output });
 
-  try {
-    const count =
-      options.count ?? (await promptPositiveInt(reader, "How many residents?", 1)).value;
-    const usedIds = new Set<string>();
-    const people: Person[] = [];
-    const peopleById = new Map<string, Person>();
-    const peopleByKey = new Map<string, string>();
-    const pendingPartnerLinks = new Map<string, string>();
-
-    for (let index = 0; index < count; index += 1) {
-      console.log("");
-      console.log(`Resident ${index + 1} of ${count}`);
-      const person = await promptPerson(
-        reader,
-        defaults,
-        usedIds,
-        peopleById,
-        peopleByKey,
-        pendingPartnerLinks
-      );
-      people.push(person);
-    }
-
-    if (pendingPartnerLinks.size > 0) {
-      console.log("");
-      console.log("Unlinked in-house partner references:");
-      pendingPartnerLinks.forEach((personId, key) => {
-        const person = peopleById.get(personId);
-        const label = person ? `${person.name} (${person.id})` : personId;
-        console.log(`- ${label} -> ${key}`);
-      });
-    }
-
-    const config: PeopleConfig = {
-      defaults,
-      people,
-    };
-
-    const resolvedOut = resolvePath(options.outPath);
-    await Bun.write(resolvedOut, JSON.stringify(config, null, 2));
-    console.log("");
-    console.log(`Saved residents to ${resolvedOut}`);
-  } finally {
-    reader.close();
+  let count = options.count;
+  if (!count) {
+    const response = await prompts({
+      type: "number",
+      name: "count",
+      message: colors.label("How many residents?"),
+      initial: 1,
+      min: 1,
+      validate: (v) => (v > 0 ? true : "Enter a positive number"),
+    });
+    count = response.count ?? 1;
   }
+
+  const usedIds = new Set<string>();
+  const people: Person[] = [];
+  const peopleById = new Map<string, Person>();
+  const peopleByKey = new Map<string, string>();
+  const pendingPartnerLinks = new Map<string, string>();
+
+  for (let index = 0; index < (count ?? 1); index += 1) {
+    log.blank();
+    console.log(
+      box(`${colors.highlight(`Resident ${index + 1} of ${count}`)}`, {
+        padding: 0,
+        borderColor: colors.info,
+      })
+    );
+    log.blank();
+
+    const person = await promptPerson(
+      defaults,
+      usedIds,
+      peopleById,
+      peopleByKey,
+      pendingPartnerLinks
+    );
+    people.push(person);
+
+    log.success(`Added ${colors.highlight(person.name)}`);
+  }
+
+  if (pendingPartnerLinks.size > 0) {
+    log.blank();
+    log.warn("Unlinked in-house partner references:");
+    pendingPartnerLinks.forEach((personId, key) => {
+      const person = peopleById.get(personId);
+      const label = person ? `${person.name} (${person.id})` : personId;
+      console.log(`  ${symbols.bullet} ${colors.dim(label)} ${symbols.arrow} ${colors.dim(key)}`);
+    });
+  }
+
+  const config: PeopleConfig = {
+    defaults,
+    people,
+  };
+
+  let outPath = options.outPath;
+  if (!outPath) {
+    const response = await prompts({
+      type: "text",
+      name: "outPath",
+      message: colors.label("Output path for people.json"),
+      validate: (v) => (v.trim() ? true : "Output path is required"),
+    });
+    if (!response.outPath) {
+      log.error("Output path is required");
+      process.exit(1);
+    }
+    outPath = response.outPath;
+  }
+
+  const resolvedOut = resolvePath(outPath!);
+  
+  // Check if path is a directory and append people.json if needed
+  let finalPath = resolvedOut;
+  try {
+    const stat = await Bun.file(resolvedOut).stat();
+    if (stat.isDirectory()) {
+      finalPath = resolvedOut.endsWith("/") 
+        ? `${resolvedOut}people.json` 
+        : `${resolvedOut}/people.json`;
+      log.info(`Directory detected, writing to ${colors.path(finalPath)}`);
+    }
+  } catch {
+    // Path doesn't exist yet or isn't accessible - check if it ends with /
+    if (resolvedOut.endsWith("/")) {
+      finalPath = `${resolvedOut}people.json`;
+      log.info(`Directory path detected, writing to ${colors.path(finalPath)}`);
+    }
+  }
+  
+  await Bun.write(finalPath, JSON.stringify(config, null, 2));
+
+  log.blank();
+  log.success(`Saved ${colors.highlight(people.length.toString())} residents to ${colors.path(finalPath)}`);
+  log.blank();
 };
 
-const parseArgs = (args: string[]): CliOptions => {
-  const getFlagValue = (flag: string): string | undefined => {
-    const index = args.indexOf(flag);
-    if (index === -1) {
-      return undefined;
-    }
-    const value = args[index + 1];
-    if (!value || value.startsWith("--")) {
-      throw new Error(`Missing value for ${flag}.`);
-    }
-    return value;
-  };
+const parseCliArgs = (args: string[]): CliOptions => {
+  const { getFlagValue, parsePositiveInt } = createArgParser(args);
 
   const countRaw = getFlagValue("--count");
   const count = countRaw ? parsePositiveInt(countRaw, "--count") : undefined;
 
   return {
-    outPath: getFlagValue("--out") ?? DEFAULT_OUT_PATH,
+    outPath: getFlagValue("--out"),
     defaultsPath: getFlagValue("--defaults"),
     count,
     help: args.includes("--help") || args.includes("-h"),
@@ -207,41 +250,58 @@ const parseArgs = (args: string[]): CliOptions => {
 };
 
 const printUsage = () => {
-  console.log("Residents builder");
-  console.log("");
-  console.log("Usage:");
-  console.log("  bun run residents.ts --out data/people.json");
-  console.log("");
-  console.log("Options:");
-  console.log("  --out <path>       Output people JSON file");
-  console.log("  --defaults <path>  Defaults JSON (people.json or defaults-only)");
-  console.log("  --count <number>   Number of residents to enter");
-  console.log("  --help, -h         Show this help");
+  console.log(
+    formatHelp({
+      name: "Residents Builder",
+      description: "Interactively create a people.json configuration file",
+      usage: "bun run residents.ts [options]",
+      options: [
+        { flag: "--out <path>", description: "Output people JSON file" },
+        { flag: "--defaults <path>", description: "Defaults JSON file to load from" },
+        { flag: "--count <number>", description: "Number of residents to enter" },
+        { flag: "--help, -h", description: "Show this help" },
+      ],
+      sections: [
+        {
+          title: "Examples:",
+          content: [
+            colors.command("bun run residents.ts --out people.json"),
+            colors.command("bun run residents.ts --count 5 --out people.json"),
+            colors.command("bun run residents.ts --defaults existing-people.json"),
+          ],
+        },
+        {
+          title: "Note:",
+          content: [
+            "If output path is not provided, you will be prompted to enter it.",
+          ],
+        },
+      ],
+    })
+  );
 };
 
-const resolvePath = (filePath: string): string =>
-  filePath.startsWith("/") ? filePath : `${process.cwd()}/${filePath}`;
-
 const loadDefaults = async (defaultsPath?: string): Promise<PersonDefaults> => {
-  const candidatePath = defaultsPath ?? DEFAULT_DEFAULTS_PATH;
-  const resolved = resolvePath(candidatePath);
+  if (!defaultsPath) {
+    log.info("Using built-in defaults");
+    return FALLBACK_DEFAULTS;
+  }
+
+  const resolved = resolvePath(defaultsPath);
   const file = Bun.file(resolved);
 
-  if (await file.exists()) {
-    const text = await file.text();
-    const parsed = JSON.parse(text) as unknown;
-    const defaults = extractDefaults(parsed);
-    if (!defaults) {
-      throw new Error(`Defaults file ${resolved} does not contain valid defaults.`);
-    }
-    return defaults;
+  if (!(await file.exists())) {
+    throw new Error(`Defaults file not found: ${colors.path(resolved)}`);
   }
 
-  if (defaultsPath) {
-    throw new Error(`Defaults file not found: ${resolved}`);
+  const text = await file.text();
+  const parsed = JSON.parse(text) as unknown;
+  const defaults = extractDefaults(parsed);
+  if (!defaults) {
+    throw new Error(`Defaults file ${colors.path(resolved)} does not contain valid defaults.`);
   }
-
-  return FALLBACK_DEFAULTS;
+  log.info(`Loaded defaults from ${colors.path(resolved)}`);
+  return defaults;
 };
 
 const extractDefaults = (data: unknown): PersonDefaults | null => {
@@ -297,30 +357,103 @@ const isPriorityWeights = (value: unknown): value is PriorityWeights => {
 };
 
 const promptPerson = async (
-  reader: ReturnType<typeof createInterface>,
   defaults: PersonDefaults,
   usedIds: Set<string>,
   peopleById: Map<string, Person>,
   peopleByKey: Map<string, string>,
   pendingPartnerLinks: Map<string, string>
 ): Promise<Person> => {
-  const name = await promptRequiredString(reader, "Name");
-  const id = await promptUniqueId(reader, name, usedIds);
-  const pendingMatch = findPendingPartner(pendingPartnerLinks, [id, name]);
+  // Basic info
+  const { name } = await prompts({
+    type: "text",
+    name: "name",
+    message: colors.label("Name"),
+    validate: (v) => (v.trim() ? true : "Name is required"),
+  });
 
-  if (pendingMatch) {
-    const partnerName = peopleById.get(pendingMatch.partnerId)?.name ?? pendingMatch.partnerId;
-    console.log(`Linking with ${partnerName} based on an earlier entry.`);
+  const defaultId = slugify(name);
+  let id = defaultId;
+
+  while (usedIds.has(id)) {
+    const response = await prompts({
+      type: "text",
+      name: "id",
+      message: colors.label(`ID (${colors.dim(defaultId)} is taken)`),
+      initial: defaultId,
+      validate: (v) => {
+        if (!v.trim()) return "ID is required";
+        if (usedIds.has(v)) return "ID already used";
+        return true;
+      },
+    });
+    id = response.id;
   }
 
-  const gender = await promptChoice(reader, "Gender", ["female", "male", "nonbinary", "other"], "other");
+  if (id !== defaultId) {
+    const response = await prompts({
+      type: "text",
+      name: "id",
+      message: colors.label("ID"),
+      initial: defaultId,
+    });
+    if (response.id && !usedIds.has(response.id)) {
+      id = response.id;
+    }
+  }
+  usedIds.add(id);
 
-  const foundHouse = await promptBoolean(reader, "Found the house?", false);
-  const handledAgent = await promptBoolean(reader, "Handled the agent?", false);
-  const attendedViewing = await promptBoolean(reader, "Attended a viewing?", false);
+  const pendingMatch = findPendingPartner(pendingPartnerLinks, [id, name]);
+  if (pendingMatch) {
+    const partnerName = peopleById.get(pendingMatch.partnerId)?.name ?? pendingMatch.partnerId;
+    log.info(`Linking with ${colors.highlight(partnerName)} based on an earlier entry`);
+  }
 
-  const currentBedType = await promptChoice(reader, "Current bed type", ["single", "double"], "single");
+  const { gender } = await prompts({
+    type: "select",
+    name: "gender",
+    message: colors.label("Gender"),
+    choices: [
+      { title: "Female", value: "female" },
+      { title: "Male", value: "male" },
+      { title: "Non-binary", value: "nonbinary" },
+      { title: "Other", value: "other" },
+    ],
+    initial: 3,
+  });
 
+  // Contributions
+  const contributions = await prompts([
+    {
+      type: "confirm",
+      name: "foundHouse",
+      message: colors.label("Found the house?"),
+      initial: false,
+    },
+    {
+      type: "confirm",
+      name: "handledAgent",
+      message: colors.label("Handled the agent?"),
+      initial: false,
+    },
+    {
+      type: "confirm",
+      name: "attendedViewing",
+      message: colors.label("Attended a viewing?"),
+      initial: false,
+    },
+  ]);
+
+  const { currentBedType } = await prompts({
+    type: "select",
+    name: "currentBedType",
+    message: colors.label("Current bed type"),
+    choices: [
+      { title: "Single", value: "single" },
+      { title: "Double", value: "double" },
+    ],
+  });
+
+  // Relationship
   let relationshipStatus: RelationshipStatus = "single";
   let partnerLocation: PartnerLocation = "none";
   let partnerId: string | undefined;
@@ -330,53 +463,124 @@ const promptPerson = async (
     partnerLocation = "house";
     partnerId = pendingMatch.partnerId;
   } else {
-    relationshipStatus = await promptChoice(reader, "Relationship status", ["single", "partnered"], "single");
+    const { status } = await prompts({
+      type: "select",
+      name: "status",
+      message: colors.label("Relationship status"),
+      choices: [
+        { title: "Single", value: "single" },
+        { title: "Partnered", value: "partnered" },
+      ],
+    });
+    relationshipStatus = status;
+
     if (relationshipStatus === "partnered") {
-      partnerLocation = await promptChoice(reader, "Partner location", ["external", "house"], "external");
+      const { location } = await prompts({
+        type: "select",
+        name: "location",
+        message: colors.label("Partner location"),
+        choices: [
+          { title: "External (not in house)", value: "external" },
+          { title: "In-house (another resident)", value: "house" },
+        ],
+      });
+      partnerLocation = location;
+
       if (partnerLocation === "house") {
-        partnerId = await promptOptionalString(reader, "Partner name or ID (blank to link later)");
+        const { partner } = await prompts({
+          type: "text",
+          name: "partner",
+          message: colors.label("Partner name or ID (blank to link later)"),
+        });
+        partnerId = partner?.trim() || undefined;
       }
     }
   }
 
-  const cooksOften = await promptBoolean(reader, "Cooks often?", false);
+  const { cooksOften } = await prompts({
+    type: "confirm",
+    name: "cooksOften",
+    message: colors.label("Cooks often?"),
+    initial: false,
+  });
 
-  console.log("");
-  console.log("Preference weights: 0-10 scale, higher = more important.");
-  console.log("Press Enter to keep defaults.");
-  const preferenceWeights = await promptWeightOverrides(
-    reader,
-    "Preference weight",
-    defaults.preferenceWeights,
-    PREFERENCE_KEYS
-  );
+  // Weight overrides (optional section)
+  const { customizeWeights } = await prompts({
+    type: "confirm",
+    name: "customizeWeights",
+    message: colors.label("Customize preference/priority weights?"),
+    initial: false,
+  });
 
-  console.log("");
-  console.log("Priority weights: points for contributions, higher = more priority.");
-  console.log("Press Enter to keep defaults.");
-  const priorityWeights = await promptWeightOverrides(
-    reader,
-    "Priority weight",
-    defaults.priorityWeights,
-    PRIORITY_KEYS
-  );
+  let preferenceWeights: Partial<PreferenceWeights> | undefined;
+  let priorityWeights: Partial<PriorityWeights> | undefined;
+  let safetyConcern: number | undefined;
+  let bedUpgradeWeight: number | undefined;
+  let bedDowngradePenalty: number | undefined;
+  let doubleBedPartnerWeight: number | undefined;
 
-  const safetyConcern = await promptOptionalNumber(reader, "Safety concern", defaults.safetyConcern);
-  const bedUpgradeWeight = await promptOptionalNumber(
-    reader,
-    "Bed upgrade weight",
-    defaults.bedUpgradeWeight
-  );
-  const bedDowngradePenalty = await promptOptionalNumber(
-    reader,
-    "Bed downgrade penalty",
-    defaults.bedDowngradePenalty
-  );
-  const doubleBedPartnerWeight = await promptOptionalNumber(
-    reader,
-    "Double bed partner weight",
-    defaults.doubleBedPartnerWeight
-  );
+  if (customizeWeights) {
+    log.blank();
+    console.log(`  ${colors.dim("Preference weights (0-10 scale, higher = more important)")}`);
+    console.log(`  ${colors.dim("Press Enter to keep default value")}`);
+    log.blank();
+
+    preferenceWeights = await promptWeightOverrides(
+      "Preference",
+      defaults.preferenceWeights,
+      PREFERENCE_KEYS
+    );
+
+    log.blank();
+    console.log(`  ${colors.dim("Priority weights (points for contributions)")}`);
+    log.blank();
+
+    priorityWeights = await promptWeightOverrides(
+      "Priority",
+      defaults.priorityWeights,
+      PRIORITY_KEYS
+    );
+
+    const advancedOverrides = await prompts([
+      {
+        type: "number",
+        name: "safetyConcern",
+        message: colors.label(`Safety concern (default: ${defaults.safetyConcern})`),
+        initial: defaults.safetyConcern,
+      },
+      {
+        type: "number",
+        name: "bedUpgradeWeight",
+        message: colors.label(`Bed upgrade weight (default: ${defaults.bedUpgradeWeight})`),
+        initial: defaults.bedUpgradeWeight,
+      },
+      {
+        type: "number",
+        name: "bedDowngradePenalty",
+        message: colors.label(`Bed downgrade penalty (default: ${defaults.bedDowngradePenalty})`),
+        initial: defaults.bedDowngradePenalty,
+      },
+      {
+        type: "number",
+        name: "doubleBedPartnerWeight",
+        message: colors.label(`Double bed partner weight (default: ${defaults.doubleBedPartnerWeight})`),
+        initial: defaults.doubleBedPartnerWeight,
+      },
+    ]);
+
+    if (advancedOverrides.safetyConcern !== defaults.safetyConcern) {
+      safetyConcern = advancedOverrides.safetyConcern;
+    }
+    if (advancedOverrides.bedUpgradeWeight !== defaults.bedUpgradeWeight) {
+      bedUpgradeWeight = advancedOverrides.bedUpgradeWeight;
+    }
+    if (advancedOverrides.bedDowngradePenalty !== defaults.bedDowngradePenalty) {
+      bedDowngradePenalty = advancedOverrides.bedDowngradePenalty;
+    }
+    if (advancedOverrides.doubleBedPartnerWeight !== defaults.doubleBedPartnerWeight) {
+      doubleBedPartnerWeight = advancedOverrides.doubleBedPartnerWeight;
+    }
+  }
 
   const relationship: Relationship = {
     status: relationshipStatus,
@@ -388,14 +592,14 @@ const promptPerson = async (
     id,
     name,
     gender,
-    foundHouse,
-    handledAgent,
-    attendedViewing,
+    foundHouse: contributions.foundHouse ?? false,
+    handledAgent: contributions.handledAgent ?? false,
+    attendedViewing: contributions.attendedViewing ?? false,
     currentBedType,
     relationship,
-    cooksOften,
-    ...(preferenceWeights ? { preferenceWeights } : {}),
-    ...(priorityWeights ? { priorityWeights } : {}),
+    cooksOften: cooksOften ?? false,
+    ...(preferenceWeights && Object.keys(preferenceWeights).length > 0 ? { preferenceWeights } : {}),
+    ...(priorityWeights && Object.keys(priorityWeights).length > 0 ? { priorityWeights } : {}),
     ...(safetyConcern !== undefined ? { safetyConcern } : {}),
     ...(bedUpgradeWeight !== undefined ? { bedUpgradeWeight } : {}),
     ...(bedDowngradePenalty !== undefined ? { bedDowngradePenalty } : {}),
@@ -416,17 +620,43 @@ const promptPerson = async (
       const existingPartnerId = peopleByKey.get(partnerKey);
       if (existingPartnerId && existingPartnerId !== person.id) {
         linkPartners(person.id, existingPartnerId, peopleById);
+        log.success(`Linked with ${colors.highlight(existingPartnerId)}`);
       } else if (existingPartnerId === person.id) {
-        console.log("Partner cannot be the same person; skipping link.");
+        log.warn("Partner cannot be the same person; skipping link");
       } else if (!pendingPartnerLinks.has(partnerKey)) {
         pendingPartnerLinks.set(partnerKey, person.id);
+        log.info(`Will link with "${requestedPartner}" when they're added`);
       } else {
-        console.log("A pending link already exists for that partner.");
+        log.warn("A pending link already exists for that partner");
       }
     }
   }
 
   return person;
+};
+
+const promptWeightOverrides = async <T extends Record<string, number>>(
+  label: string,
+  defaults: T,
+  keys: Array<keyof T>
+): Promise<Partial<T> | undefined> => {
+  const overrides: Partial<T> = {};
+
+  for (const key of keys) {
+    const defaultValue = defaults[key] as number;
+    const { value } = await prompts({
+      type: "number",
+      name: "value",
+      message: colors.label(`${label} - ${colors.highlight(String(key))}`),
+      initial: defaultValue,
+    });
+
+    if (value !== undefined && value !== defaultValue) {
+      overrides[key] = value as T[keyof T];
+    }
+  }
+
+  return Object.keys(overrides).length > 0 ? overrides : undefined;
 };
 
 type PendingPartnerMatch = {
@@ -481,184 +711,6 @@ const linkPartners = (personId: string, partnerId: string, peopleById: Map<strin
   };
 };
 
-const promptUniqueId = async (
-
-  reader: ReturnType<typeof createInterface>,
-  name: string,
-  usedIds: Set<string>
-): Promise<string> => {
-  const defaultId = slugify(name);
-  while (true) {
-    const result = await promptString(reader, "ID", defaultId);
-    const id = result.value;
-    if (!usedIds.has(id)) {
-      usedIds.add(id);
-      return id;
-    }
-    console.log(`ID ${id} is already used. Please choose another.`);
-  }
-};
-
-const promptWeightOverrides = async <T extends Record<string, number>>(
-  reader: ReturnType<typeof createInterface>,
-  label: string,
-  defaults: T,
-  keys: Array<keyof T>
-): Promise<Partial<T> | undefined> => {
-  const overrides: Partial<T> = {};
-
-  for (const key of keys) {
-    const defaultValue = defaults[key] as number;
-    const result = await promptNumber(reader, `${label} - ${String(key)}`, defaultValue);
-    if (!result.usedDefault && result.value !== defaultValue) {
-      overrides[key] = result.value as T[keyof T];
-    }
-  }
-
-  return Object.keys(overrides).length > 0 ? overrides : undefined;
-};
-
-const promptRequiredString = async (
-  reader: ReturnType<typeof createInterface>,
-  label: string
-): Promise<string> => {
-  while (true) {
-    const result = await promptString(reader, label);
-    const value = result.value.trim();
-    if (value) {
-      return value;
-    }
-    console.log("Value is required.");
-  }
-};
-
-const promptOptionalString = async (
-  reader: ReturnType<typeof createInterface>,
-  label: string
-): Promise<string | undefined> => {
-  const result = await promptString(reader, label);
-  const value = result.value.trim();
-  return value ? value : undefined;
-};
-
-const promptString = async (
-  reader: ReturnType<typeof createInterface>,
-  label: string,
-  defaultValue?: string
-): Promise<PromptResult<string>> => {
-  const hint = defaultValue ? ` [${defaultValue}]` : "";
-  const answer = (await reader.question(`${label}${hint}: `)).trim();
-  if (!answer && defaultValue !== undefined) {
-    return { value: defaultValue, usedDefault: true };
-  }
-  return { value: answer, usedDefault: false };
-};
-
-const promptChoice = async <T extends string>(
-  reader: ReturnType<typeof createInterface>,
-  label: string,
-  options: T[],
-  defaultValue: T
-): Promise<T> => {
-  const choices = options.join("/");
-  while (true) {
-    const answer = (await reader.question(`${label} (${choices}) [${defaultValue}]: `))
-      .trim()
-      .toLowerCase();
-    if (!answer) {
-      return defaultValue;
-    }
-    const match = options.find((option) => option.toLowerCase() === answer);
-    if (match) {
-      return match;
-    }
-    console.log(`Choose one of: ${choices}.`);
-  }
-};
-
-const promptBoolean = async (
-  reader: ReturnType<typeof createInterface>,
-  label: string,
-  defaultValue: boolean
-): Promise<boolean> => {
-  const hint = defaultValue ? "Y/n" : "y/N";
-  while (true) {
-    const answer = (await reader.question(`${label} (${hint}): `)).trim().toLowerCase();
-    if (!answer) {
-      return defaultValue;
-    }
-    if (["y", "yes"].includes(answer)) {
-      return true;
-    }
-    if (["n", "no"].includes(answer)) {
-      return false;
-    }
-    console.log("Answer with y or n.");
-  }
-};
-
-const promptNumber = async (
-  reader: ReturnType<typeof createInterface>,
-  label: string,
-  defaultValue: number
-): Promise<PromptResult<number>> => {
-  while (true) {
-    const answer = (await reader.question(`${label} [${defaultValue}]: `)).trim();
-    if (!answer) {
-      return { value: defaultValue, usedDefault: true };
-    }
-    const value = Number(answer);
-    if (Number.isFinite(value)) {
-      return { value, usedDefault: false };
-    }
-    console.log("Enter a valid number.");
-  }
-};
-
-const promptOptionalNumber = async (
-  reader: ReturnType<typeof createInterface>,
-  label: string,
-  defaultValue: number
-): Promise<number | undefined> => {
-  while (true) {
-    const answer = (await reader.question(`${label} [${defaultValue}] (blank to keep): `)).trim();
-    if (!answer) {
-      return undefined;
-    }
-    const value = Number(answer);
-    if (Number.isFinite(value)) {
-      return value;
-    }
-    console.log("Enter a valid number.");
-  }
-};
-
-const promptPositiveInt = async (
-  reader: ReturnType<typeof createInterface>,
-  label: string,
-  defaultValue: number
-): Promise<PromptResult<number>> => {
-  while (true) {
-    const answer = (await reader.question(`${label} [${defaultValue}]: `)).trim();
-    if (!answer) {
-      return { value: defaultValue, usedDefault: true };
-    }
-    const value = Number(answer);
-    if (Number.isInteger(value) && value > 0) {
-      return { value, usedDefault: false };
-    }
-    console.log("Enter a positive whole number.");
-  }
-};
-
-const parsePositiveInt = (value: string, label: string): number => {
-  const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed <= 0) {
-    throw new Error(`Invalid ${label} value: ${value}. Expected a positive whole number.`);
-  }
-  return parsed;
-};
-
 const slugify = (value: string): string => {
   const slug = value
     .trim()
@@ -668,4 +720,4 @@ const slugify = (value: string): string => {
   return slug || "resident";
 };
 
-await main();
+main().catch(handleError);

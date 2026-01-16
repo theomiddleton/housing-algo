@@ -37,7 +37,7 @@ bun run rightmove.ts --url "https://www.rightmove.co.uk/properties/..." --out da
 
 Optional Rightmove flags:
 
-- `--model <name>` to override the Gemini model (defaults to `GEMINI_MODEL` or `gemini-1.5-flash`)
+- `--model <name>` to override the Gemini model (defaults to `GEMINI_MODEL` or `gemini-3-flash-preview`)
 - `--max-images <count>` to limit inline listing photos
 - `--max-floorplans <count>` to limit inline floorplan images
 
