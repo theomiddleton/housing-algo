@@ -20,6 +20,7 @@ import {
   DEFAULT_GEMINI_TIMEOUT_MS,
   DEFAULT_GEMINI_RETRIES,
 } from "./lib/ai";
+import { assignRooms } from "./lib/assignment";
 import type {
   BedType,
   Gender,
@@ -28,7 +29,6 @@ import type {
   HouseConfig,
   Person,
   PeopleConfig,
-  PersonMeta,
   Assignment,
   ScoreResult,
   ScoringMode,
@@ -176,7 +176,7 @@ const main = async () => {
   const { scores, reasons } = scoreResult;
   const { assignment, totalScore } = assignRooms(
     scores,
-    peopleMeta,
+    peopleConfig.people,
     houseConfig.rooms,
   );
   const result = assignment.map((roomIndex, personIndex) => {
@@ -475,130 +475,6 @@ const isRelationship = (value: unknown): value is Relationship => {
     relationship.partnerId === undefined ||
     typeof relationship.partnerId === "string";
   return validStatus && validPartnerLocation && validPartnerId;
-};
-
-const assignRooms = (
-  scores: number[][],
-  peopleMeta: PersonMeta[],
-  rooms: Room[],
-): { assignment: number[]; totalScore: number } => {
-  const peopleCount = scores.length;
-  const roomsCount = rooms.length;
-
-  if (roomsCount > 20) {
-    return greedyAssignment(scores, peopleMeta, roomsCount);
-  }
-
-  const maxMask = 1 << roomsCount;
-  const dp = new Array<number>(maxMask).fill(Number.NEGATIVE_INFINITY);
-  const prev = new Array<number>(maxMask).fill(-1);
-  const picked = new Array<number>(maxMask).fill(-1);
-  dp[0] = 0;
-
-  for (let mask = 0; mask < maxMask; mask++) {
-    const personIndex = countBits(mask);
-    if (personIndex >= peopleCount) {
-      continue;
-    }
-    for (let roomIndex = 0; roomIndex < roomsCount; roomIndex++) {
-      if (mask & (1 << roomIndex)) {
-        continue;
-      }
-      const nextMask = mask | (1 << roomIndex);
-      const nextScore =
-        (dp[mask] ?? Number.NEGATIVE_INFINITY) +
-        scores[personIndex]![roomIndex]!;
-      if (nextScore > (dp[nextMask] ?? Number.NEGATIVE_INFINITY)) {
-        dp[nextMask] = nextScore;
-        prev[nextMask] = mask;
-        picked[nextMask] = roomIndex;
-      }
-    }
-  }
-
-  let bestMask = -1;
-  let bestScore = Number.NEGATIVE_INFINITY;
-  for (let mask = 0; mask < maxMask; mask++) {
-    if (countBits(mask) !== peopleCount) {
-      continue;
-    }
-    const currentScore = dp[mask] ?? Number.NEGATIVE_INFINITY;
-    if (currentScore > bestScore) {
-      bestScore = currentScore;
-      bestMask = mask;
-    }
-  }
-
-  if (bestMask === -1) {
-    throw new Error("Unable to compute a valid assignment.");
-  }
-
-  const assignment = new Array<number>(peopleCount).fill(-1);
-  let mask = bestMask;
-  for (let personIndex = peopleCount - 1; personIndex >= 0; personIndex--) {
-    const roomIndex = picked[mask] ?? -1;
-    if (roomIndex === -1) {
-      throw new Error("Unable to reconstruct assignment.");
-    }
-    assignment[personIndex] = roomIndex;
-    const previousMask = prev[mask] ?? -1;
-    if (previousMask === -1 && personIndex !== 0) {
-      throw new Error("Unable to reconstruct assignment.");
-    }
-    mask = previousMask;
-  }
-
-  return { assignment, totalScore: bestScore };
-};
-
-const greedyAssignment = (
-  scores: number[][],
-  peopleMeta: PersonMeta[],
-  roomsCount: number,
-): { assignment: number[]; totalScore: number } => {
-  const peopleOrder = scores
-    .map((_, index) => ({
-      index,
-      priority: peopleMeta[index]!.priorityMultiplier,
-    }))
-    .sort((a, b) => b.priority - a.priority);
-
-  const assignment = new Array<number>(scores.length).fill(-1);
-  const usedRooms = new Set<number>();
-  let totalScore = 0;
-
-  peopleOrder.forEach(({ index }) => {
-    let bestRoom = -1;
-    let bestScore = Number.NEGATIVE_INFINITY;
-    for (let roomIndex = 0; roomIndex < roomsCount; roomIndex++) {
-      if (usedRooms.has(roomIndex)) {
-        continue;
-      }
-      const score = scores[index]![roomIndex]!;
-      if (score > bestScore) {
-        bestScore = score;
-        bestRoom = roomIndex;
-      }
-    }
-    if (bestRoom === -1) {
-      throw new Error("Unable to find room for person.");
-    }
-    assignment[index] = bestRoom;
-    usedRooms.add(bestRoom);
-    totalScore += bestScore;
-  });
-
-  return { assignment, totalScore };
-};
-
-const countBits = (mask: number): number => {
-  let count = 0;
-  let value = mask;
-  while (value) {
-    count += value & 1;
-    value >>= 1;
-  }
-  return count;
 };
 
 const round = (value: number): number => Math.round(value * 100) / 100;

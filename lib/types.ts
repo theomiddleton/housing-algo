@@ -201,3 +201,35 @@ export type CliOptions = {
   help: boolean;
   gemini: GeminiCliOptions;
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Assignment Types
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Result of the assignment solver.
+ */
+export type AssignmentResult = {
+  /** Mapping from personId to roomId */
+  assignment: Map<string, string>;
+  /** Total score of the optimal assignment */
+  totalScore: number;
+};
+
+/**
+ * Options for the assignment solver.
+ */
+export type AssignmentOptions = {
+  /**
+   * Enable deterministic tie-breaking via epsilon perturbation.
+   * When enabled, adds tiny deterministic values based on IDs to break ties.
+   * Default: true
+   */
+  deterministicTieBreak?: boolean;
+  /**
+   * Epsilon value for tie-breaking perturbation.
+   * Should be small enough to never change real decisions.
+   * Default: 1e-9
+   */
+  epsilon?: number;
+};

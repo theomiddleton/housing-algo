@@ -7,16 +7,16 @@
     - [x] Couples are prioritized for a double bed, but if the relationship is internal and there is >=1 single bed, a member of the couple is strongly prioritized for a single bed.
     - [ ] Those currently living in a room with a single bed are prioritized for a single bed.
     - [x] Couples external couples are prioritized for a double bed over single people.
-  - [ ] First floor more attractive than ground floor
+  - [x] First floor more attractive than ground floor
     - [x] First floor higher safety score than ground floor
       - [x] Back of house higher safety score than front of house (More so for ground floor)
   - [x] Change ground floor safety score to safetyConcern rather than tied to gender
   - [x] Add distance to Kitchen as low weight - close/far
   - [ ] Normalise weights 
   - [ ] Finding house and dealing with agents should have equal weights
-  - [ ] Potentially change bonus from multiplier to fixed bonus
+  - [x] Potentially change bonus from multiplier to fixed bonus
   - [ ] Brief Housemates on this algo, agree on weights and rules
-  - [ ] Remove determanism based on input ordering. Algorithm determanism should be independent of input ordering
+  - [x] Remove determanism based on input ordering. Algorithm determanism should be independent of input ordering
   - [ ] Re-Review through chat
   - [ ] Add bypass to certain parts of the algorithm, eg, ignore kitchenProximity or floor level
 - [ ] Add entropy mode
