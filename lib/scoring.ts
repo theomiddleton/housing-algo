@@ -34,6 +34,27 @@ export const normalizeValues = (values: number[]): number[] => {
 };
 
 /**
+ * Calculates safety risk for a room based on floor and facing.
+ * Ground floor is less safe than upper floors.
+ * Front-facing is less safe than back-facing.
+ *
+ * Risk levels (0 = safest, 1 = least safe):
+ * - Back, Upper floor:   0.0
+ * - Front, Upper floor:  0.25
+ * - Back, Ground floor:  0.5
+ * - Front, Ground floor: 1.0
+ */
+const calculateSafetyRisk = (room: Room): number => {
+  const isGround = room.floor === 0;
+  const isFront = room.isFrontFacing;
+
+  if (isGround && isFront) return 1.0;
+  if (isGround && !isFront) return 0.5;
+  if (!isGround && isFront) return 0.25;
+  return 0.0;
+};
+
+/**
  * Builds normalized metrics for each room to enable fair comparisons.
  */
 export const buildRoomMetrics = (rooms: Room[]): RoomMetrics[] => {
@@ -61,7 +82,7 @@ export const buildRoomMetrics = (rooms: Room[]): RoomMetrics[] => {
       quiet: 1 - (noiseNorm[index] ?? 0),
       kitchenProximity: room.nearKitchen ? 1 : 0,
       ensuite: room.ensuite ? 1 : 0,
-      isFrontGround: room.floor === 0 && room.isFrontFacing,
+      safetyRisk: calculateSafetyRisk(room),
       bedValue: room.bedType === "double" ? 1 : 0,
     };
   });
@@ -122,6 +143,7 @@ export const buildPeopleMeta = (
       priorityScore,
       priorityMultiplier,
       safetyConcern: person.safetyConcern ?? defaults.safetyConcern,
+      hasSafetyConcern: person.hasSafetyConcern ?? false,
       bedUpgradeWeight: person.bedUpgradeWeight ?? defaults.bedUpgradeWeight,
       bedDowngradePenalty:
         person.bedDowngradePenalty ?? defaults.bedDowngradePenalty,
@@ -133,7 +155,6 @@ export const buildPeopleMeta = (
       doubleBedInternalCoupleWeight:
         person.doubleBedInternalCoupleWeight ??
         defaults.doubleBedInternalCoupleWeight,
-      safetySensitiveGenders: defaults.safetySensitiveGenders,
     };
   });
 };
@@ -143,16 +164,10 @@ export const buildPeopleMeta = (
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Determines if a person should receive a safety penalty for front-ground rooms.
+ * Determines if a person has safety concerns (per-person setting).
  */
-export const personNeedsSafetyPenalty = (
-  person: Person,
-  meta: PersonMeta,
-): boolean => {
-  return (
-    meta.safetyConcern > 0 &&
-    meta.safetySensitiveGenders.includes(person.gender)
-  );
+export const personHasSafetyConcern = (meta: PersonMeta): boolean => {
+  return meta.hasSafetyConcern && meta.safetyConcern > 0;
 };
 
 /**
@@ -236,9 +251,10 @@ export const scoreRoom = (
     }
   }
 
-  // Safety penalty for front-ground rooms
-  if (metrics.isFrontGround && personNeedsSafetyPenalty(person, meta)) {
-    score -= meta.safetyConcern;
+  // Safety penalty based on room risk level (ground floor + front facing = highest risk)
+  // Only applies to people with hasSafetyConcern = true
+  if (personHasSafetyConcern(meta)) {
+    score -= metrics.safetyRisk * meta.safetyConcern;
   }
 
   // Apply priority multiplier

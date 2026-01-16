@@ -65,7 +65,6 @@ export type PersonDefaults = {
   singleBedInternalCoupleWeight: number;
   doubleBedInternalCoupleWeight: number;
   priorityScale: number;
-  safetySensitiveGenders: Gender[];
 };
 
 export type Person = {
@@ -78,6 +77,7 @@ export type Person = {
   currentBedType: BedType;
   relationship: Relationship;
   cooksOften: boolean;
+  hasSafetyConcern?: boolean;
   preferenceWeights?: Partial<PreferenceWeights>;
   priorityWeights?: Partial<PriorityWeights>;
   safetyConcern?: number;
@@ -102,7 +102,7 @@ export type RoomMetrics = {
   quiet: number;
   kitchenProximity: number;
   ensuite: number;
-  isFrontGround: boolean;
+  safetyRisk: number;
   bedValue: number;
 };
 
@@ -112,12 +112,12 @@ export type PersonMeta = {
   priorityScore: number;
   priorityMultiplier: number;
   safetyConcern: number;
+  hasSafetyConcern: boolean;
   bedUpgradeWeight: number;
   bedDowngradePenalty: number;
   doubleBedPartnerWeight: number;
   singleBedInternalCoupleWeight: number;
   doubleBedInternalCoupleWeight: number;
-  safetySensitiveGenders: Gender[];
 };
 
 export type HouseMeta = {

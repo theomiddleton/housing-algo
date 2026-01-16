@@ -52,7 +52,6 @@ type PersonDefaults = {
   singleBedInternalCoupleWeight: number;
   doubleBedInternalCoupleWeight: number;
   priorityScale: number;
-  safetySensitiveGenders: Gender[];
 };
 
 type Person = {
@@ -65,6 +64,7 @@ type Person = {
   currentBedType: BedType;
   relationship: Relationship;
   cooksOften: boolean;
+  hasSafetyConcern?: boolean;
   preferenceWeights?: Partial<PreferenceWeights>;
   priorityWeights?: Partial<PriorityWeights>;
   safetyConcern?: number;
@@ -111,7 +111,6 @@ const FALLBACK_DEFAULTS: PersonDefaults = {
   singleBedInternalCoupleWeight: 4,
   doubleBedInternalCoupleWeight: 5,
   priorityScale: 10,
-  safetySensitiveGenders: ["female", "nonbinary"],
 };
 
 const PREFERENCE_KEYS: Array<keyof PreferenceWeights> = [
@@ -341,8 +340,7 @@ const isPersonDefaults = (value: Record<string, unknown>): value is PersonDefaul
     typeof value.bedUpgradeWeight === "number" &&
     typeof value.bedDowngradePenalty === "number" &&
     typeof value.doubleBedPartnerWeight === "number" &&
-    typeof value.priorityScale === "number" &&
-    Array.isArray(value.safetySensitiveGenders)
+    typeof value.priorityScale === "number"
   );
 };
 
@@ -510,6 +508,13 @@ const promptPerson = async (
     initial: false,
   });
 
+  const { hasSafetyConcern } = await prompts({
+    type: "confirm",
+    name: "hasSafetyConcern",
+    message: colors.label("Has safety concerns? (prefers upper/back rooms)"),
+    initial: false,
+  });
+
   // Weight overrides (optional section)
   const { customizeWeights } = await prompts({
     type: "confirm",
@@ -604,6 +609,7 @@ const promptPerson = async (
     currentBedType,
     relationship,
     cooksOften: cooksOften ?? false,
+    ...(hasSafetyConcern ? { hasSafetyConcern } : {}),
     ...(preferenceWeights && Object.keys(preferenceWeights).length > 0 ? { preferenceWeights } : {}),
     ...(priorityWeights && Object.keys(priorityWeights).length > 0 ? { priorityWeights } : {}),
     ...(safetyConcern !== undefined ? { safetyConcern } : {}),
