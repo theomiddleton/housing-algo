@@ -84,6 +84,7 @@ export const buildRoomMetrics = (rooms: Room[]): RoomMetrics[] => {
       ensuite: room.ensuite ? 1 : 0,
       safetyRisk: calculateSafetyRisk(room),
       bedValue: room.bedType === "double" ? 1 : 0,
+      floorLevel: room.floor > 0 ? 1 : 0,
     };
   });
 };
@@ -205,6 +206,9 @@ export const scoreRoom = (
 
   // Ensuite preference
   score += metrics.ensuite * meta.preferenceWeights.ensuite;
+
+  // Floor level preference (first floor more attractive than ground)
+  score += metrics.floorLevel * meta.preferenceWeights.floor;
 
   // Bed type base preference
   score += metrics.bedValue * meta.preferenceWeights.bedType;

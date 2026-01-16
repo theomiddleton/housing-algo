@@ -34,6 +34,7 @@ type PreferenceWeights = {
   quiet: number;
   kitchenProximity: number;
   ensuite: number;
+  floor: number;
 };
 
 type PriorityWeights = {
@@ -98,6 +99,7 @@ const FALLBACK_DEFAULTS: PersonDefaults = {
     quiet: 3,
     kitchenProximity: 2,
     ensuite: 2,
+    floor: 2,
   },
   priorityWeights: {
     foundHouse: 6,
@@ -123,6 +125,7 @@ const PREFERENCE_KEYS: Array<keyof PreferenceWeights> = [
   "quiet",
   "kitchenProximity",
   "ensuite",
+  "floor",
 ];
 
 const PRIORITY_KEYS: Array<keyof PriorityWeights> = [

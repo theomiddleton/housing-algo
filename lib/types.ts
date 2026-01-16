@@ -47,6 +47,7 @@ export type PreferenceWeights = {
   quiet: number;
   kitchenProximity: number;
   ensuite: number;
+  floor: number;
 };
 
 export type PriorityWeights = {
@@ -104,6 +105,7 @@ export type RoomMetrics = {
   ensuite: number;
   safetyRisk: number;
   bedValue: number;
+  floorLevel: number;
 };
 
 export type PersonMeta = {
