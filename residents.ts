@@ -31,7 +31,6 @@ type PriorityWeights = {
   foundHouse: number;
   handledAgent: number;
   attendedViewing: number;
-  didPaperwork: number;
 };
 
 type PersonDefaults = {
@@ -52,7 +51,6 @@ type Person = {
   foundHouse: boolean;
   handledAgent: boolean;
   attendedViewing: boolean;
-  didPaperwork: boolean;
   currentBedType: BedType;
   relationship: Relationship;
   cooksOften: boolean;
@@ -100,7 +98,6 @@ const FALLBACK_DEFAULTS: PersonDefaults = {
     foundHouse: 6,
     handledAgent: 4,
     attendedViewing: 2,
-    didPaperwork: 3,
   },
   safetyConcern: 4,
   bedUpgradeWeight: 2.5,
@@ -126,7 +123,6 @@ const PRIORITY_KEYS: Array<keyof PriorityWeights> = [
   "foundHouse",
   "handledAgent",
   "attendedViewing",
-  "didPaperwork",
 ];
 
 const main = async () => {
@@ -322,7 +318,6 @@ const promptPerson = async (
   const foundHouse = await promptBoolean(reader, "Found the house?", false);
   const handledAgent = await promptBoolean(reader, "Handled the agent?", false);
   const attendedViewing = await promptBoolean(reader, "Attended a viewing?", false);
-  const didPaperwork = await promptBoolean(reader, "Did the paperwork?", false);
 
   const currentBedType = await promptChoice(reader, "Current bed type", ["single", "double"], "single");
 
@@ -339,7 +334,7 @@ const promptPerson = async (
     if (relationshipStatus === "partnered") {
       partnerLocation = await promptChoice(reader, "Partner location", ["external", "house"], "external");
       if (partnerLocation === "house") {
-        partnerId = await promptRequiredString(reader, "Partner name or ID (links later if needed)");
+        partnerId = await promptOptionalString(reader, "Partner name or ID (blank to link later)");
       }
     }
   }
@@ -396,7 +391,6 @@ const promptPerson = async (
     foundHouse,
     handledAgent,
     attendedViewing,
-    didPaperwork,
     currentBedType,
     relationship,
     cooksOften,
@@ -536,6 +530,15 @@ const promptRequiredString = async (
     }
     console.log("Value is required.");
   }
+};
+
+const promptOptionalString = async (
+  reader: ReturnType<typeof createInterface>,
+  label: string
+): Promise<string | undefined> => {
+  const result = await promptString(reader, label);
+  const value = result.value.trim();
+  return value ? value : undefined;
 };
 
 const promptString = async (

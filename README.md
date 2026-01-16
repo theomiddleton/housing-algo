@@ -22,7 +22,8 @@ Optional flags:
 
 - `--json` for machine-readable output
 - `--mode ai` to send a scoring request to an external decider (set `AI_DECIDER_URL`)
-- `--mode gemini` to send Gemini-compatible payloads to the decider (set `AI_DECIDER_URL`)
+- `--mode gemini` to score rooms with Gemini (set `GEMINI_API_KEY`)
+- `--gemini-questions` to let Gemini ask clarifying questions in the terminal
 - `--gemini-model <name>` to pass a Gemini model identifier
 - `--gemini-data <path>` to attach data files (repeatable)
 - `--gemini-webpage <url>` to attach webpage URLs (repeatable)
