@@ -13,6 +13,7 @@ import type {
   PreferenceWeights,
   PriorityWeights,
   PersonDefaults,
+  HouseMeta,
 } from "./types";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -126,6 +127,9 @@ export const buildPeopleMeta = (
         person.bedDowngradePenalty ?? defaults.bedDowngradePenalty,
       doubleBedPartnerWeight:
         person.doubleBedPartnerWeight ?? defaults.doubleBedPartnerWeight,
+      singleBedInternalCoupleWeight:
+        person.singleBedInternalCoupleWeight ??
+        defaults.singleBedInternalCoupleWeight,
       safetySensitiveGenders: defaults.safetySensitiveGenders,
     };
   });
@@ -157,12 +161,14 @@ export const personNeedsSafetyPenalty = (
  * - Kitchen proximity for people who cook often
  * - Safety concerns for front-ground rooms
  * - Priority multiplier for contributions to finding the house
+ * - Internal couple single bed preference (when house has single beds)
  */
 export const scoreRoom = (
   person: Person,
   room: Room,
   metrics: RoomMetrics,
   meta: PersonMeta,
+  houseMeta: HouseMeta,
 ): number => {
   let score = 0;
 
@@ -196,12 +202,27 @@ export const scoreRoom = (
   }
 
   // External partner double bed preference
+  // External couples are prioritized for double beds (they host their partner)
   if (
     person.relationship.status === "partnered" &&
     person.relationship.partnerLocation === "external"
   ) {
     if (room.bedType === "double") {
       score += meta.doubleBedPartnerWeight;
+    }
+  }
+
+  // Internal couple single bed preference
+  // When partnered with someone in the house and there's at least one single bed,
+  // strongly prioritize single beds. The couple will share a double bed (partner's),
+  // so taking a single frees up a double for others.
+  if (
+    person.relationship.status === "partnered" &&
+    person.relationship.partnerLocation === "house" &&
+    houseMeta.hasSingleBed
+  ) {
+    if (room.bedType === "single") {
+      score += meta.singleBedInternalCoupleWeight;
     }
   }
 
@@ -223,6 +244,11 @@ export const buildDeterministicScores = (
   roomMetrics: RoomMetrics[],
   peopleMeta: PersonMeta[],
 ): number[][] => {
+  // Compute house-level metadata
+  const houseMeta: HouseMeta = {
+    hasSingleBed: rooms.some((room) => room.bedType === "single"),
+  };
+
   return people.map((person, personIndex) => {
     return rooms.map((room, roomIndex) => {
       return scoreRoom(
@@ -230,6 +256,7 @@ export const buildDeterministicScores = (
         room,
         roomMetrics[roomIndex]!,
         peopleMeta[personIndex]!,
+        houseMeta,
       );
     });
   });

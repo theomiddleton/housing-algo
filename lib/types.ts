@@ -62,6 +62,7 @@ export type PersonDefaults = {
   bedUpgradeWeight: number;
   bedDowngradePenalty: number;
   doubleBedPartnerWeight: number;
+  singleBedInternalCoupleWeight: number;
   priorityScale: number;
   safetySensitiveGenders: Gender[];
 };
@@ -82,6 +83,7 @@ export type Person = {
   bedUpgradeWeight?: number;
   bedDowngradePenalty?: number;
   doubleBedPartnerWeight?: number;
+  singleBedInternalCoupleWeight?: number;
 };
 
 export type PeopleConfig = {
@@ -111,7 +113,12 @@ export type PersonMeta = {
   bedUpgradeWeight: number;
   bedDowngradePenalty: number;
   doubleBedPartnerWeight: number;
+  singleBedInternalCoupleWeight: number;
   safetySensitiveGenders: Gender[];
+};
+
+export type HouseMeta = {
+  hasSingleBed: boolean;
 };
 
 export type Assignment = {
