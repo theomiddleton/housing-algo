@@ -145,6 +145,7 @@ export const buildPeopleMeta = (
       priorityMultiplier,
       safetyConcern: person.safetyConcern ?? defaults.safetyConcern,
       hasSafetyConcern: person.hasSafetyConcern ?? false,
+      kitchenPreference: person.kitchenPreference ?? "none",
       bedUpgradeWeight: person.bedUpgradeWeight ?? defaults.bedUpgradeWeight,
       bedDowngradePenalty:
         person.bedDowngradePenalty ?? defaults.bedDowngradePenalty,
@@ -199,9 +200,12 @@ export const scoreRoom = (
   score += metrics.storage * meta.preferenceWeights.storage;
   score += metrics.quiet * meta.preferenceWeights.quiet;
 
-  // Kitchen proximity bonus for frequent cooks
-  if (person.cooksOften) {
+  // Kitchen proximity preference
+  // "close" = bonus for being near kitchen, "far" = bonus for being away from kitchen
+  if (meta.kitchenPreference === "close") {
     score += metrics.kitchenProximity * meta.preferenceWeights.kitchenProximity;
+  } else if (meta.kitchenPreference === "far") {
+    score += (1 - metrics.kitchenProximity) * meta.preferenceWeights.kitchenProximity;
   }
 
   // Ensuite preference

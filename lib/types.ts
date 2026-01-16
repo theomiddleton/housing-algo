@@ -10,6 +10,8 @@ export type RelationshipStatus = "single" | "partnered";
 
 export type PartnerLocation = "none" | "external" | "house";
 
+export type KitchenPreference = "close" | "far" | "none";
+
 export type Relationship = {
   status: RelationshipStatus;
   partnerLocation: PartnerLocation;
@@ -78,6 +80,7 @@ export type Person = {
   currentBedType: BedType;
   relationship: Relationship;
   cooksOften: boolean;
+  kitchenPreference?: KitchenPreference;
   hasSafetyConcern?: boolean;
   preferenceWeights?: Partial<PreferenceWeights>;
   priorityWeights?: Partial<PriorityWeights>;
@@ -115,6 +118,7 @@ export type PersonMeta = {
   priorityMultiplier: number;
   safetyConcern: number;
   hasSafetyConcern: boolean;
+  kitchenPreference: KitchenPreference;
   bedUpgradeWeight: number;
   bedDowngradePenalty: number;
   doubleBedPartnerWeight: number;

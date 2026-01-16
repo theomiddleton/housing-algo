@@ -18,6 +18,8 @@ type RelationshipStatus = "single" | "partnered";
 
 type PartnerLocation = "none" | "external" | "house";
 
+type KitchenPreference = "close" | "far" | "none";
+
 type Relationship = {
   status: RelationshipStatus;
   partnerLocation: PartnerLocation;
@@ -65,6 +67,7 @@ type Person = {
   currentBedType: BedType;
   relationship: Relationship;
   cooksOften: boolean;
+  kitchenPreference?: KitchenPreference;
   hasSafetyConcern?: boolean;
   preferenceWeights?: Partial<PreferenceWeights>;
   priorityWeights?: Partial<PriorityWeights>;
@@ -511,6 +514,18 @@ const promptPerson = async (
     initial: false,
   });
 
+  const { kitchenPreference } = await prompts({
+    type: "select",
+    name: "kitchenPreference",
+    message: colors.label("Kitchen proximity preference"),
+    choices: [
+      { title: "No preference", value: "none" },
+      { title: "Close to kitchen", value: "close" },
+      { title: "Far from kitchen", value: "far" },
+    ],
+    initial: 0,
+  });
+
   const { hasSafetyConcern } = await prompts({
     type: "confirm",
     name: "hasSafetyConcern",
@@ -612,6 +627,7 @@ const promptPerson = async (
     currentBedType,
     relationship,
     cooksOften: cooksOften ?? false,
+    ...(kitchenPreference && kitchenPreference !== "none" ? { kitchenPreference } : {}),
     ...(hasSafetyConcern ? { hasSafetyConcern } : {}),
     ...(preferenceWeights && Object.keys(preferenceWeights).length > 0 ? { preferenceWeights } : {}),
     ...(priorityWeights && Object.keys(priorityWeights).length > 0 ? { priorityWeights } : {}),
