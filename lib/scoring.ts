@@ -130,6 +130,9 @@ export const buildPeopleMeta = (
       singleBedInternalCoupleWeight:
         person.singleBedInternalCoupleWeight ??
         defaults.singleBedInternalCoupleWeight,
+      doubleBedInternalCoupleWeight:
+        person.doubleBedInternalCoupleWeight ??
+        defaults.doubleBedInternalCoupleWeight,
       safetySensitiveGenders: defaults.safetySensitiveGenders,
     };
   });
@@ -212,16 +215,23 @@ export const scoreRoom = (
     }
   }
 
-  // Internal couple single bed preference
+  // Internal couple bed preference
   // When partnered with someone in the house and there's at least one single bed,
-  // strongly prioritize single beds. The couple will share a double bed (partner's),
-  // so taking a single frees up a double for others.
+  // one partner is prioritized for the double bed (they'll share it),
+  // the other is prioritized for a single bed (freeing up a double for others).
+  // We use alphabetical ID comparison to deterministically assign roles.
   if (
     person.relationship.status === "partnered" &&
     person.relationship.partnerLocation === "house" &&
     houseMeta.hasSingleBed
   ) {
-    if (room.bedType === "single") {
+    const partnerId = person.relationship.partnerId;
+    // The partner with the "smaller" ID gets the double, the other gets the single
+    const getsDouble = partnerId ? person.id < partnerId : false;
+
+    if (getsDouble && room.bedType === "double") {
+      score += meta.doubleBedInternalCoupleWeight;
+    } else if (!getsDouble && room.bedType === "single") {
       score += meta.singleBedInternalCoupleWeight;
     }
   }

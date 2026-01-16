@@ -63,6 +63,7 @@ export type PersonDefaults = {
   bedDowngradePenalty: number;
   doubleBedPartnerWeight: number;
   singleBedInternalCoupleWeight: number;
+  doubleBedInternalCoupleWeight: number;
   priorityScale: number;
   safetySensitiveGenders: Gender[];
 };
@@ -84,6 +85,7 @@ export type Person = {
   bedDowngradePenalty?: number;
   doubleBedPartnerWeight?: number;
   singleBedInternalCoupleWeight?: number;
+  doubleBedInternalCoupleWeight?: number;
 };
 
 export type PeopleConfig = {
@@ -114,6 +116,7 @@ export type PersonMeta = {
   bedDowngradePenalty: number;
   doubleBedPartnerWeight: number;
   singleBedInternalCoupleWeight: number;
+  doubleBedInternalCoupleWeight: number;
   safetySensitiveGenders: Gender[];
 };
 

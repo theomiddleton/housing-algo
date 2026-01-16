@@ -50,6 +50,7 @@ type PersonDefaults = {
   bedDowngradePenalty: number;
   doubleBedPartnerWeight: number;
   singleBedInternalCoupleWeight: number;
+  doubleBedInternalCoupleWeight: number;
   priorityScale: number;
   safetySensitiveGenders: Gender[];
 };
@@ -71,6 +72,7 @@ type Person = {
   bedDowngradePenalty?: number;
   doubleBedPartnerWeight?: number;
   singleBedInternalCoupleWeight?: number;
+  doubleBedInternalCoupleWeight?: number;
 };
 
 type PeopleConfig = {
@@ -107,6 +109,7 @@ const FALLBACK_DEFAULTS: PersonDefaults = {
   bedDowngradePenalty: 3,
   doubleBedPartnerWeight: 3,
   singleBedInternalCoupleWeight: 4,
+  doubleBedInternalCoupleWeight: 5,
   priorityScale: 10,
   safetySensitiveGenders: ["female", "nonbinary"],
 };
