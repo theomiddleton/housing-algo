@@ -1,11 +1,10 @@
-- [ ] Split rooms for couple (One good, One bad)
-- [ ] Use images for room score?
-  - [ ] Score each room based on its image.
-  - [ ] Provide an output on which images reviewed, and which discarded (common areas)
+- [x] Use images for room score?
+  - [x] Score each room based on its image.
+  - [x] Provide an output on which images reviewed, and which discarded (common areas)
 - [ ] Adjust algorithm
-  - [ ] Bed
+  - [x] Bed
     - [x] Couples are prioritized for a double bed, but if the relationship is internal and there is >=1 single bed, a member of the couple is strongly prioritized for a single bed.
-    - [ ] Those currently living in a room with a single bed are prioritized for a single bed.
+    - [x] Those currently living in a room with a single bed are prioritized for a single bed.
     - [x] Couples external couples are prioritized for a double bed over single people.
   - [x] First floor more attractive than ground floor
     - [x] First floor higher safety score than ground floor
@@ -13,7 +12,7 @@
   - [x] Change ground floor safety score to safetyConcern rather than tied to gender
   - [x] Add distance to Kitchen as low weight - close/far
   - [ ] Normalise weights 
-  - [ ] Finding house and dealing with agents should have equal weights
+  - [x] Finding house and dealing with agents should have equal weights
   - [x] Potentially change bonus from multiplier to fixed bonus
   - [ ] Brief Housemates on this algo, agree on weights and rules
   - [x] Remove determanism based on input ordering. Algorithm determanism should be independent of input ordering

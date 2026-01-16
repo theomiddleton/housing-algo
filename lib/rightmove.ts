@@ -1,3 +1,4 @@
+import { GoogleGenAI, type Content, type Part } from "@google/genai";
 import {
   colors,
   log,
@@ -9,6 +10,20 @@ import {
 } from "./cli";
 
 type BedType = "single" | "double";
+
+type ImageClassification = {
+  url: string;
+  type: "bedroom" | "shared" | "floorplan";
+  confidence: number;
+  roomId?: string;
+};
+
+type ProcessingStats = {
+  floorplansProcessed: number;
+  imagesIgnored: number;
+  bedroomImagesProcessed: number;
+  classifications: ImageClassification[];
+};
 
 type Room = {
   id: string;
@@ -46,27 +61,10 @@ type ListingSignals = {
   floorplans: string[];
 };
 
-type GeminiTextPart = {
-  text: string;
-};
-
-type GeminiInlinePart = {
-  inline_data: {
-    mime_type: string;
-    data: string;
-  };
-};
-
-type GeminiPart = GeminiTextPart | GeminiInlinePart;
-
-type GeminiResponse = {
-  candidates?: Array<{
-    content?: {
-      parts?: Array<{
-        text?: string;
-      }>;
-    };
-  }>;
+type InlineImage = {
+  url: string;
+  mimeType: string;
+  base64: string;
 };
 
 type CliOptions = {
@@ -115,8 +113,11 @@ const main = async () => {
   // Generate house config with Gemini
   const geminiSpinner = spinner.start("Generating house data with Gemini...");
   let houseConfig: HouseConfig;
+  let stats: ProcessingStats;
   try {
-    houseConfig = await buildHouseConfig(listing, options, geminiSpinner);
+    const result = await buildHouseConfig(listing, options, geminiSpinner);
+    houseConfig = result.config;
+    stats = result.stats;
     assertHouseConfig(houseConfig);
     geminiSpinner.succeed(`Generated config with ${colors.highlight(houseConfig.rooms.length.toString())} rooms`);
   } catch (error) {
@@ -131,6 +132,26 @@ const main = async () => {
   log.blank();
   log.success(`Wrote house data to ${colors.path(resolvedOut)}`);
   log.blank();
+
+  // Show processing stats
+  console.log(colors.label("  Image Processing:"));
+  console.log(`    ${colors.highlight("Floorplans processed:")} ${stats.floorplansProcessed}`);
+  console.log(`    ${colors.highlight("Shared area images ignored:")} ${stats.imagesIgnored}`);
+  console.log(`    ${colors.highlight("Bedroom images processed:")} ${stats.bedroomImagesProcessed}`);
+  log.blank();
+
+  // Show classification details
+  if (stats.classifications.length > 0) {
+    console.log(colors.label("  Image Classifications:"));
+    stats.classifications.forEach((c) => {
+      const urlShort = c.url.split("/").pop() ?? c.url;
+      const confidenceStr = `${(c.confidence * 100).toFixed(0)}%`;
+      const roomStr = c.roomId ? ` → ${c.roomId}` : "";
+      const typeColor = c.type === "bedroom" ? colors.success : colors.dim;
+      console.log(`    ${typeColor(c.type.padEnd(8))} ${colors.dim(confidenceStr.padStart(4))}${roomStr} ${colors.dim(urlShort)}`);
+    });
+    log.blank();
+  }
 
   // Show room summary
   console.log(colors.label("  Rooms:"));
@@ -467,60 +488,99 @@ const buildHouseConfig = async (
   listing: RightmoveListing,
   options: CliOptions,
   geminiSpinner: ReturnType<typeof spinner.start>
-): Promise<HouseConfig> => {
+): Promise<{ config: HouseConfig; stats: ProcessingStats }> => {
   const apiKey = Bun.env.GEMINI_API_KEY;
   if (!apiKey) {
     throw new Error("Missing GEMINI_API_KEY in the environment.");
   }
 
+  const client = new GoogleGenAI({ apiKey });
   const floorplans = listing.floorplans.slice(0, options.maxFloorplans);
   const photos = listing.images.slice(0, options.maxImages);
-  const parts: GeminiPart[] = [
-    {
-      text: buildPrompt(listing, floorplans, photos),
-    },
+
+  // Fetch all images first
+  geminiSpinner.text = "Fetching listing images...";
+  const floorplanImages = await fetchImages(floorplans);
+  const photoImages = await fetchImages(photos);
+
+  // Step 1: Classify images to detect bedrooms vs shared areas
+  geminiSpinner.text = "Classifying images...";
+  const classifications = await classifyImages(client, options.model, photoImages);
+
+  const bedroomImages = classifications.filter((c) => c.type === "bedroom");
+  const ignoredImages = classifications.filter((c) => c.type === "shared");
+
+  const stats: ProcessingStats = {
+    floorplansProcessed: floorplanImages.length,
+    imagesIgnored: ignoredImages.length,
+    bedroomImagesProcessed: bedroomImages.length,
+    classifications,
+  };
+
+  // Step 2: Build house config using floorplans and bedroom images only
+  geminiSpinner.text = `Generating house config with ${colors.highlight(options.model)}...`;
+
+  const bedroomInlineImages = bedroomImages
+    .map((c) => photoImages.find((img) => img.url === c.url))
+    .filter((img): img is InlineImage => img !== undefined);
+
+  const parts: Part[] = [
+    { text: buildPrompt(listing, floorplans, bedroomImages.map((b) => b.url)) },
   ];
 
-  geminiSpinner.text = "Fetching listing images...";
-  const floorplanParts = await buildInlineImageParts(floorplans);
-  const photoParts = await buildInlineImageParts(photos);
-  parts.push(...floorplanParts, ...photoParts);
-
-  geminiSpinner.text = `Sending request to ${colors.highlight(options.model)}...`;
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${options.model}:generateContent?key=${apiKey}`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
+  // Add floorplan images
+  floorplanImages.forEach((img) => {
+    parts.push({ text: `Floorplan image:` });
+    parts.push({
+      inlineData: {
+        mimeType: img.mimeType,
+        data: img.base64,
       },
-      body: JSON.stringify({
-        contents: [
-          {
-            role: "user",
-            parts,
-          },
-        ],
-        generationConfig: {
-          temperature: 0.2,
-          responseMimeType: "application/json",
-        },
-      }),
-    }
-  );
+    });
+  });
 
-  if (!response.ok) {
-    throw new Error(`Gemini request failed: ${response.status} ${response.statusText}`);
+  // Add bedroom images with their classifications
+  bedroomInlineImages.forEach((img) => {
+    const classification = bedroomImages.find((c) => c.url === img.url);
+    const roomInfo = classification?.roomId
+      ? ` (matched to room: ${classification.roomId}, confidence: ${(classification.confidence * 100).toFixed(0)}%)`
+      : ` (confidence: ${(classification?.confidence ?? 0 * 100).toFixed(0)}%)`;
+    parts.push({ text: `Bedroom photo${roomInfo}:` });
+    parts.push({
+      inlineData: {
+        mimeType: img.mimeType,
+        data: img.base64,
+      },
+    });
+  });
+
+  const contents: Content[] = [{ role: "user", parts }];
+
+  const response = await client.models.generateContent({
+    model: options.model,
+    contents,
+    config: {
+      temperature: 0.2,
+      responseMimeType: "application/json",
+    },
+  });
+
+  const responseText = response.text?.trim() ?? "";
+  if (!responseText) {
+    throw new Error("Gemini response did not include text content.");
   }
 
-  const data = (await response.json()) as GeminiResponse;
-  const responseText = extractGeminiText(data);
   const jsonPayload = parseJsonFromText(responseText);
-  return jsonPayload as HouseConfig;
+
+  // Step 3: Adjust attractiveness scores based on bedroom images
+  const houseConfig = jsonPayload as HouseConfig;
+  adjustAttractivenessFromImages(houseConfig, bedroomImages);
+
+  return { config: houseConfig, stats };
 };
 
-const buildInlineImageParts = async (urls: string[]): Promise<GeminiInlinePart[]> => {
-  const parts: GeminiInlinePart[] = [];
+const fetchImages = async (urls: string[]): Promise<InlineImage[]> => {
+  const images: InlineImage[] = [];
   for (const url of urls) {
     try {
       const response = await fetch(url);
@@ -529,17 +589,129 @@ const buildInlineImageParts = async (urls: string[]): Promise<GeminiInlinePart[]
       }
       const buffer = await response.arrayBuffer();
       const mimeType = response.headers.get("content-type") ?? "application/octet-stream";
-      parts.push({
-        inline_data: {
-          mime_type: mimeType,
-          data: Buffer.from(buffer).toString("base64"),
-        },
+      images.push({
+        url,
+        mimeType,
+        base64: Buffer.from(buffer).toString("base64"),
       });
     } catch (error) {
       log.warn(`Skipping image ${colors.dim(url)}: ${String(error)}`);
     }
   }
-  return parts;
+  return images;
+};
+
+type ClassificationResponse = {
+  images: Array<{
+    url: string;
+    type: "bedroom" | "shared";
+    confidence: number;
+    roomId?: string;
+    reasoning: string;
+  }>;
+};
+
+const classifyImages = async (
+  client: GoogleGenAI,
+  model: string,
+  images: InlineImage[]
+): Promise<ImageClassification[]> => {
+  if (images.length === 0) {
+    return [];
+  }
+
+  const classificationPrompt = [
+    "Classify each of the following images as either a 'bedroom' or 'shared' area.",
+    "",
+    "BEDROOM images include:",
+    "- Private bedrooms with beds",
+    "- En-suite bathrooms attached to bedrooms",
+    "",
+    "SHARED images include (should be ignored for room scoring):",
+    "- Living rooms, lounges",
+    "- Kitchens, dining areas",
+    "- Hallways, corridors, staircases",
+    "- External views, gardens",
+    "- Shared bathrooms (not en-suite)",
+    "- Utility rooms, storage areas",
+    "",
+    "For each image, provide:",
+    "- type: 'bedroom' or 'shared'",
+    "- confidence: 0.0 to 1.0 (how confident you are)",
+    "- roomId: if bedroom, suggest which room it might be (e.g., 'room-1', 'master-bedroom')",
+    "- reasoning: brief explanation",
+    "",
+    "Return JSON in this format:",
+    '{ "images": [{ "url": "<original_url>", "type": "bedroom|shared", "confidence": 0.0-1.0, "roomId": "string or null", "reasoning": "string" }] }',
+    "",
+    `There are ${images.length} images to classify:`,
+  ].join("\n");
+
+  const parts: Part[] = [{ text: classificationPrompt }];
+
+  images.forEach((img, index) => {
+    parts.push({ text: `Image ${index + 1} (URL: ${img.url}):` });
+    parts.push({
+      inlineData: {
+        mimeType: img.mimeType,
+        data: img.base64,
+      },
+    });
+  });
+
+  const contents: Content[] = [{ role: "user", parts }];
+
+  const response = await client.models.generateContent({
+    model,
+    contents,
+    config: {
+      temperature: 0.1,
+      responseMimeType: "application/json",
+    },
+  });
+
+  const responseText = response.text?.trim() ?? "";
+  if (!responseText) {
+    throw new Error("Classification response empty.");
+  }
+
+  const parsed = parseJsonFromText(responseText) as ClassificationResponse;
+
+  return parsed.images.map((item) => ({
+    url: item.url,
+    type: item.type,
+    confidence: item.confidence,
+    roomId: item.roomId,
+  }));
+};
+
+const adjustAttractivenessFromImages = (
+  houseConfig: HouseConfig,
+  bedroomImages: ImageClassification[]
+): void => {
+  // Group bedroom images by roomId
+  const imagesByRoom = new Map<string, ImageClassification[]>();
+
+  bedroomImages.forEach((img) => {
+    if (img.roomId) {
+      const existing = imagesByRoom.get(img.roomId) ?? [];
+      existing.push(img);
+      imagesByRoom.set(img.roomId, existing);
+    }
+  });
+
+  // Adjust attractiveness based on image confidence
+  // Higher confidence in matching = more reliable attractiveness assessment
+  houseConfig.rooms.forEach((room) => {
+    const matchedImages = imagesByRoom.get(room.id);
+    if (matchedImages && matchedImages.length > 0) {
+      // Average confidence of matched images can boost attractiveness slightly
+      const avgConfidence = matchedImages.reduce((sum, img) => sum + img.confidence, 0) / matchedImages.length;
+      // Boost attractiveness by up to 1 point based on high-confidence image matches
+      const boost = Math.round(avgConfidence * 1);
+      room.attractiveness = Math.min(10, room.attractiveness + boost);
+    }
+  });
 };
 
 const buildPrompt = (
@@ -586,6 +758,8 @@ const buildPrompt = (
     "- Use square meters for sizeSqm.",
     "- Score attractiveness/noise/storage/sunlight from 0-10.",
     "- Use floor 0 for ground floor, 1 for first floor, etc.",
+    "- Room names MUST include the bed type (single/double) for clarity.",
+    "  Example: 'Bedroom 1, Double (Ground Floor Front)'",
     "",
     `Listing URL: ${listing.url}`,
     `Listing title: ${title}`,
@@ -606,16 +780,6 @@ const trimToLength = (value: string, maxLength: number): string => {
     return value;
   }
   return `${value.slice(0, maxLength)}...`;
-};
-
-const extractGeminiText = (response: GeminiResponse): string => {
-  const candidate = response.candidates?.[0];
-  const parts = candidate?.content?.parts ?? [];
-  const text = parts.map((part) => part.text ?? "").join("\n").trim();
-  if (!text) {
-    throw new Error("Gemini response did not include text content.");
-  }
-  return text;
 };
 
 const parseJsonFromText = (text: string): unknown => {
