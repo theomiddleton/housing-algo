@@ -9,6 +9,7 @@ type PartnerLocation = "none" | "external" | "house";
 type Relationship = {
   status: RelationshipStatus;
   partnerLocation: PartnerLocation;
+  partnerId?: string;
 };
 
 type Room = {
@@ -49,7 +50,6 @@ type PriorityWeights = {
   handledAgent: number;
   attendedViewing: number;
   didPaperwork: number;
-  flexibleMoveIn: number;
 };
 
 type PersonDefaults = {
@@ -59,9 +59,7 @@ type PersonDefaults = {
   bedUpgradeWeight: number;
   bedDowngradePenalty: number;
   doubleBedPartnerWeight: number;
-  workFromHomeBonus: number;
   priorityScale: number;
-  ensuitePenalty: number;
   safetySensitiveGenders: Gender[];
 };
 
@@ -73,21 +71,15 @@ type Person = {
   handledAgent: boolean;
   attendedViewing: boolean;
   didPaperwork: boolean;
-  flexibleMoveIn: boolean;
   currentBedType: BedType;
   relationship: Relationship;
-  worksFromHome: boolean;
-  prefersQuiet: boolean;
-  needsStorage: boolean;
   cooksOften: boolean;
-  requiresEnsuite: boolean;
   preferenceWeights?: Partial<PreferenceWeights>;
   priorityWeights?: Partial<PriorityWeights>;
   safetyConcern?: number;
   bedUpgradeWeight?: number;
   bedDowngradePenalty?: number;
   doubleBedPartnerWeight?: number;
-  workFromHomeBonus?: number;
 };
 
 type PeopleConfig = {
@@ -117,8 +109,6 @@ type PersonMeta = {
   bedUpgradeWeight: number;
   bedDowngradePenalty: number;
   doubleBedPartnerWeight: number;
-  workFromHomeBonus: number;
-  ensuitePenalty: number;
   safetySensitiveGenders: Gender[];
 };
 
@@ -130,7 +120,33 @@ type Assignment = {
   priorityMultiplier: number;
 };
 
-type ScoringMode = "deterministic" | "ai";
+type ScoringMode = "deterministic" | "ai" | "gemini";
+
+type GeminiAttachment = {
+  name: string;
+  mimeType: string;
+  encoding: "text" | "base64";
+  content: string;
+};
+
+type GeminiInput = {
+  model?: string;
+  data: GeminiAttachment[];
+  webpages: string[];
+  images: GeminiAttachment[];
+};
+
+type GeminiCliOptions = {
+  model?: string;
+  dataPaths: string[];
+  webpageUrls: string[];
+  imagePaths: string[];
+};
+
+type AiOptions = {
+  mode: Exclude<ScoringMode, "deterministic">;
+  gemini: GeminiCliOptions;
+};
 
 type CliOptions = {
   housePath: string;
@@ -138,6 +154,7 @@ type CliOptions = {
   mode: ScoringMode;
   json: boolean;
   help: boolean;
+  gemini: GeminiCliOptions;
 };
 
 const DEFAULT_HOUSE_PATH = "data/house.json";
@@ -164,9 +181,12 @@ const main = async () => {
   const peopleMeta = buildPeopleMeta(peopleConfig.people, peopleConfig.defaults);
 
   const scores =
-    options.mode === "ai"
-      ? await buildAiScores(peopleConfig, houseConfig, roomMetrics, peopleMeta)
-      : buildDeterministicScores(peopleConfig.people, houseConfig.rooms, roomMetrics, peopleMeta);
+    options.mode === "deterministic"
+      ? buildDeterministicScores(peopleConfig.people, houseConfig.rooms, roomMetrics, peopleMeta)
+      : await buildAiScores(peopleConfig, houseConfig, roomMetrics, peopleMeta, {
+          mode: options.mode,
+          gemini: options.gemini,
+        });
 
   const { assignment, totalScore } = assignRooms(scores, peopleMeta, houseConfig.rooms);
   const result = assignment.map((roomIndex, personIndex) => {
@@ -233,16 +253,32 @@ const main = async () => {
 };
 
 const parseArgs = (args: string[]): CliOptions => {
-  const getFlagValue = (flag: string) => {
-    const index = args.indexOf(flag);
-    return index !== -1 && index + 1 < args.length ? args[index + 1] : undefined;
+  const getFlagValues = (flag: string): string[] => {
+    const values: string[] = [];
+    for (let index = 0; index < args.length; index++) {
+      if (args[index] !== flag) {
+        continue;
+      }
+      const value = args[index + 1];
+      if (!value || value.startsWith("--")) {
+        throw new Error(`Missing value for ${flag}.`);
+      }
+      values.push(value);
+    }
+    return values;
+  };
+
+  const getFlagValue = (flag: string): string | undefined => {
+    const values = getFlagValues(flag);
+    return values.length > 0 ? values[values.length - 1] : undefined;
   };
 
   const modeRaw = getFlagValue("--mode");
-  const mode: ScoringMode = modeRaw === "ai" ? "ai" : "deterministic";
+  const mode: ScoringMode =
+    modeRaw === "ai" || modeRaw === "gemini" ? modeRaw : "deterministic";
 
-  if (modeRaw && modeRaw !== "ai" && modeRaw !== "deterministic") {
-    throw new Error(`Unknown mode: ${modeRaw}. Use --mode deterministic|ai.`);
+  if (modeRaw && modeRaw !== "ai" && modeRaw !== "deterministic" && modeRaw !== "gemini") {
+    throw new Error(`Unknown mode: ${modeRaw}. Use --mode deterministic|ai|gemini.`);
   }
 
   return {
@@ -251,6 +287,12 @@ const parseArgs = (args: string[]): CliOptions => {
     mode,
     json: args.includes("--json"),
     help: args.includes("--help") || args.includes("-h"),
+    gemini: {
+      model: getFlagValue("--gemini-model"),
+      dataPaths: getFlagValues("--gemini-data"),
+      webpageUrls: getFlagValues("--gemini-webpage"),
+      imagePaths: getFlagValues("--gemini-image"),
+    },
   };
 };
 
@@ -261,21 +303,100 @@ const printUsage = () => {
   console.log("  bun run index.ts --house data/house.json --people data/people.json");
   console.log("");
   console.log("Options:");
-  console.log("  --mode deterministic|ai   Scoring strategy (default: deterministic)");
-  console.log("  --json                    Output JSON for integrations");
-  console.log("  --house <path>            House/room JSON file");
-  console.log("  --people <path>           People/weights JSON file");
-  console.log("  --help, -h                Show this help");
+  console.log("  --mode deterministic|ai|gemini  Scoring strategy (default: deterministic)");
+  console.log("  --json                          Output JSON for integrations");
+  console.log("  --house <path>                  House/room JSON file");
+  console.log("  --people <path>                 People/weights JSON file");
+  console.log("  --gemini-model <name>           Gemini model identifier");
+  console.log("  --gemini-data <path>            Attach data file (repeatable)");
+  console.log("  --gemini-webpage <url>          Attach webpage URL (repeatable)");
+  console.log("  --gemini-image <path>           Attach image file (repeatable)");
+  console.log("  --help, -h                      Show this help");
 };
 
+const resolvePath = (filePath: string): string =>
+  filePath.startsWith("/") ? filePath : `${process.cwd()}/${filePath}`;
+
 const readJson = async <T,>(filePath: string): Promise<T> => {
-  const resolved = filePath.startsWith("/") ? filePath : `${process.cwd()}/${filePath}`;
+  const resolved = resolvePath(filePath);
   const file = Bun.file(resolved);
   if (!(await file.exists())) {
     throw new Error(`File not found: ${resolved}`);
   }
   const text = await file.text();
   return JSON.parse(text) as T;
+};
+
+const isTextMime = (mimeType: string): boolean => {
+  return (
+    mimeType.startsWith("text/") ||
+    mimeType.includes("json") ||
+    mimeType.includes("xml") ||
+    mimeType.includes("yaml") ||
+    mimeType.includes("csv")
+  );
+};
+
+const getFileName = (filePath: string): string => {
+  const segments = filePath.split("/");
+  return segments.length > 0 ? (segments[segments.length - 1] ?? filePath) : filePath;
+};
+
+const readGeminiAttachment = async (
+  filePath: string,
+  options: { defaultMimeType: string; forceBase64?: boolean }
+): Promise<GeminiAttachment> => {
+  const resolved = resolvePath(filePath);
+  const file = Bun.file(resolved);
+  if (!(await file.exists())) {
+    throw new Error(`File not found: ${resolved}`);
+  }
+
+  const mimeType = file.type || options.defaultMimeType;
+  const name = getFileName(resolved);
+
+  if (options.forceBase64 || !isTextMime(mimeType)) {
+    const buffer = await file.arrayBuffer();
+    return {
+      name,
+      mimeType,
+      encoding: "base64",
+      content: Buffer.from(buffer).toString("base64"),
+    };
+  }
+
+  return {
+    name,
+    mimeType,
+    encoding: "text",
+    content: await file.text(),
+  };
+};
+
+const buildGeminiPayload = async (options: GeminiCliOptions): Promise<GeminiInput> => {
+  const data = await Promise.all(
+    options.dataPaths.map((path) =>
+      readGeminiAttachment(path, {
+        defaultMimeType: "text/plain",
+      })
+    )
+  );
+
+  const images = await Promise.all(
+    options.imagePaths.map((path) =>
+      readGeminiAttachment(path, {
+        defaultMimeType: "application/octet-stream",
+        forceBase64: true,
+      })
+    )
+  );
+
+  return {
+    model: options.model,
+    data,
+    webpages: options.webpageUrls,
+    images,
+  };
 };
 
 const assertHouseConfig = (house: HouseConfig) => {
@@ -328,7 +449,9 @@ const isRelationship = (value: unknown): value is Relationship => {
     relationship.partnerLocation === "none" ||
     relationship.partnerLocation === "external" ||
     relationship.partnerLocation === "house";
-  return validStatus && validPartnerLocation;
+  const validPartnerId =
+    relationship.partnerId === undefined || typeof relationship.partnerId === "string";
+  return validStatus && validPartnerLocation && validPartnerId;
 };
 
 const buildRoomMetrics = (rooms: Room[]): RoomMetrics[] => {
@@ -386,8 +509,6 @@ const buildPeopleMeta = (people: Person[], defaults: PersonDefaults): PersonMeta
       bedUpgradeWeight: person.bedUpgradeWeight ?? defaults.bedUpgradeWeight,
       bedDowngradePenalty: person.bedDowngradePenalty ?? defaults.bedDowngradePenalty,
       doubleBedPartnerWeight: person.doubleBedPartnerWeight ?? defaults.doubleBedPartnerWeight,
-      workFromHomeBonus: person.workFromHomeBonus ?? defaults.workFromHomeBonus,
-      ensuitePenalty: defaults.ensuitePenalty,
       safetySensitiveGenders: defaults.safetySensitiveGenders,
     };
   });
@@ -408,8 +529,7 @@ const calculatePriorityScore = (person: Person, weights: PriorityWeights): numbe
     (person.foundHouse ? weights.foundHouse : 0) +
     (person.handledAgent ? weights.handledAgent : 0) +
     (person.attendedViewing ? weights.attendedViewing : 0) +
-    (person.didPaperwork ? weights.didPaperwork : 0) +
-    (person.flexibleMoveIn ? weights.flexibleMoveIn : 0)
+    (person.didPaperwork ? weights.didPaperwork : 0)
   );
 };
 
@@ -435,12 +555,15 @@ const buildAiScores = async (
   peopleConfig: PeopleConfig,
   houseConfig: HouseConfig,
   roomMetrics: RoomMetrics[],
-  peopleMeta: PersonMeta[]
+  peopleMeta: PersonMeta[],
+  aiOptions: AiOptions
 ): Promise<number[][]> => {
   const endpoint = Bun.env.AI_DECIDER_URL;
   if (!endpoint) {
-    throw new Error("AI mode requires AI_DECIDER_URL in the environment.");
+    throw new Error("AI/Gemini mode requires AI_DECIDER_URL in the environment.");
   }
+
+  const gemini = await buildGeminiPayload(aiOptions.gemini);
 
   const response = await fetch(endpoint, {
     method: "POST",
@@ -452,6 +575,8 @@ const buildAiScores = async (
       people: peopleConfig,
       roomMetrics,
       peopleMeta,
+      mode: aiOptions.mode,
+      gemini,
     }),
   });
 
@@ -479,21 +604,14 @@ const scoreRoom = (
   score += metrics.attractiveness * meta.preferenceWeights.attractiveness;
   score += metrics.sunlight * meta.preferenceWeights.sunlight;
 
-  if (person.needsStorage) {
-    score += metrics.storage * meta.preferenceWeights.storage;
-  }
-
-  if (person.prefersQuiet) {
-    score += metrics.quiet * meta.preferenceWeights.quiet;
-  }
+  score += metrics.storage * meta.preferenceWeights.storage;
+  score += metrics.quiet * meta.preferenceWeights.quiet;
 
   if (person.cooksOften) {
     score += metrics.kitchenProximity * meta.preferenceWeights.kitchenProximity;
   }
 
-  if (person.requiresEnsuite) {
-    score += metrics.ensuite * meta.preferenceWeights.ensuite;
-  }
+  score += metrics.ensuite * meta.preferenceWeights.ensuite;
 
   score += metrics.bedValue * meta.preferenceWeights.bedType;
 
@@ -511,14 +629,6 @@ const scoreRoom = (
     }
   }
 
-  if (person.worksFromHome) {
-    score +=
-      meta.workFromHomeBonus * average([metrics.size, metrics.quiet, metrics.sunlight]);
-  }
-
-  if (person.requiresEnsuite && !room.ensuite) {
-    score -= meta.ensuitePenalty;
-  }
 
   if (metrics.isFrontGround && personNeedsSafetyPenalty(person, meta)) {
     score -= meta.safetyConcern;
@@ -529,10 +639,6 @@ const scoreRoom = (
 
 const personNeedsSafetyPenalty = (person: Person, meta: PersonMeta): boolean => {
   return meta.safetyConcern > 0 && meta.safetySensitiveGenders.includes(person.gender);
-};
-
-const average = (values: number[]): number => {
-  return values.reduce((sum, value) => sum + value, 0) / values.length;
 };
 
 const assignRooms = (
