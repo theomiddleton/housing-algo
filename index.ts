@@ -319,9 +319,7 @@ const main = async () => {
       priorityMultiplier: meta.priorityMultiplier,
       reason:
         reason ??
-        (mode === "deterministic"
-          ? undefined
-          : "No reason provided by AI."),
+        (mode === "deterministic" ? undefined : "No reason provided by AI."),
     } satisfies Assignment;
   });
 
@@ -654,10 +652,7 @@ const buildGeminiPrompt = (
   ].join("\n");
 };
 
-const buildGeminiParts = (
-  prompt: string,
-  gemini: GeminiInput,
-): Part[] => {
+const buildGeminiParts = (prompt: string, gemini: GeminiInput): Part[] => {
   const parts: Part[] = [{ text: prompt }];
 
   gemini.webpages.forEach((url) => {
@@ -1108,7 +1103,7 @@ const buildGeminiScores = async (
 
   const client = new GoogleGenAI({ apiKey });
   const model =
-    geminiOptions.model ?? Bun.env.GEMINI_MODEL ?? "gemini-2.0-flash";
+    geminiOptions.model ?? Bun.env.GEMINI_MODEL ?? "gemini-3-flash-preview";
   const gemini = await buildGeminiPayload(geminiOptions);
   const prompt = buildGeminiPrompt(
     peopleConfig,
@@ -1175,15 +1170,15 @@ const buildGeminiScores = async (
             round: round + 1,
             maxRounds,
           });
-          
+
           if (geminiOptions.debug) {
             geminiSpinner.stop();
             log.info("Gemini response text:");
             console.log(responseText);
           }
-          
+
           const payload = parseGeminiScorePayload(responseText);
-          
+
           if (geminiOptions.debug) {
             log.info("Parsed payload:");
             console.log(JSON.stringify(payload, null, 2));

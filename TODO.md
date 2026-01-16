@@ -1,0 +1,5 @@
+- [ ] Split rooms for couple (One good, One bad)
+- [ ] Use images for room score?
+- [ ] Adjust algorithm
+- [ ] Add entropy mode
+- [ ] Review
