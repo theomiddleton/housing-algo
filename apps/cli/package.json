@@ -1,5 +1,5 @@
 {
-  "name": "housing-algo",
+  "name": "@housing-algo/cli",
   "module": "index.ts",
   "type": "module",
   "private": true,
