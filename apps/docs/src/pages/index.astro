@@ -1,0 +1,250 @@
+---
+import Layout from '../layouts/Layout.astro';
+import { MatchingVisualization } from '../components/MatchingVisualization';
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../components/ui/card';
+import { Button } from '../components/ui/button';
+import { Badge } from '../components/ui/badge';
+import { Cpu, Scale, Terminal, ArrowRight, Sparkles, Users, Home } from 'lucide-react';
+---
+
+<Layout title="Home">
+  <!-- Hero Section -->
+  <section class="relative overflow-hidden">
+    <!-- Gradient overlay -->
+    <div class="absolute inset-0 bg-gradient-to-b from-warning/5 via-transparent to-transparent pointer-events-none"></div>
+    
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20 lg:py-32">
+      <div class="grid lg:grid-cols-2 gap-12 items-center">
+        <!-- Left: Text content -->
+        <div class="space-y-8">
+          <div class="space-y-4">
+            <Badge className="mb-4">Open Source Room Assignment</Badge>
+            <h1 class="text-4xl sm:text-5xl lg:text-6xl font-bold tracking-tight">
+              <span class="text-gray-100">Optimal</span>
+              <span class="text-gradient"> Room Assignment</span>
+              <span class="text-gray-100"> Algorithm</span>
+            </h1>
+            <p class="text-xl text-muted-foreground max-w-lg">
+              Fair, deterministic room assignments for shared housing using the 
+              <span class="text-warning"> Hungarian Algorithm</span>. 
+              Maximize satisfaction while respecting everyone's preferences.
+            </p>
+          </div>
+
+          <div class="flex flex-wrap gap-4">
+            <a href="/algorithm">
+              <Button size="lg" className="group">
+                Explore Algorithm
+                <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-1" />
+              </Button>
+            </a>
+            <a href="/usage">
+              <Button variant="outline" size="lg">
+                Quick Start
+              </Button>
+            </a>
+          </div>
+
+          <div class="flex items-center gap-6 text-sm text-muted-foreground">
+            <div class="flex items-center gap-2">
+              <div class="w-2 h-2 bg-emerald-400 animate-pulse"></div>
+              <span>O(n³) Complexity</span>
+            </div>
+            <div class="flex items-center gap-2">
+              <div class="w-2 h-2 bg-warning animate-pulse"></div>
+              <span>Deterministic</span>
+            </div>
+            <div class="flex items-center gap-2">
+              <div class="w-2 h-2 bg-orange-400 animate-pulse"></div>
+              <span>Fair</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Right: Animation -->
+        <div class="lg:pl-8">
+          <div class="relative">
+            <div class="absolute -inset-4 bg-gradient-to-r from-warning/20 to-orange-500/20 blur-xl opacity-50"></div>
+            <div class="relative blueprint-card p-6">
+              <MatchingVisualization client:load />
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Features Section -->
+  <section class="py-20 border-t border-industrial-border">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="text-center mb-16">
+        <h2 class="text-3xl font-bold text-gray-100 mb-4">How It Works</h2>
+        <p class="text-muted-foreground max-w-2xl mx-auto">
+          A sophisticated scoring system combined with optimal matching ensures 
+          everyone gets the best possible room based on their preferences and priorities.
+        </p>
+      </div>
+
+      <div class="grid md:grid-cols-3 gap-8">
+        <a href="/algorithm" class="group">
+          <Card className="h-full transition-all hover:border-warning/50 hover:shadow-lg hover:shadow-warning/10">
+            <CardHeader>
+              <div class="w-12 h-12 bg-warning/20 flex items-center justify-center mb-4 group-hover:bg-warning/30 transition-colors">
+                <Cpu className="w-6 h-6 text-warning" />
+              </div>
+              <CardTitle>The Algorithm</CardTitle>
+              <CardDescription>
+                Deep dive into the Hungarian Algorithm and how it guarantees globally optimal assignments.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <ul class="space-y-2 text-sm text-muted-foreground">
+                <li class="flex items-center gap-2">
+                  <div class="w-1.5 h-1.5 bg-warning"></div>
+                  Score matrix construction
+                </li>
+                <li class="flex items-center gap-2">
+                  <div class="w-1.5 h-1.5 bg-warning"></div>
+                  Optimal bipartite matching
+                </li>
+                <li class="flex items-center gap-2">
+                  <div class="w-1.5 h-1.5 bg-warning"></div>
+                  Deterministic tie-breaking
+                </li>
+              </ul>
+            </CardContent>
+          </Card>
+        </a>
+
+        <a href="/weights" class="group">
+          <Card className="h-full transition-all hover:border-orange-500/50 hover:shadow-lg hover:shadow-orange-500/10">
+            <CardHeader>
+              <div class="w-12 h-12 bg-orange-500/20 flex items-center justify-center mb-4 group-hover:bg-orange-500/30 transition-colors">
+                <Scale className="w-6 h-6 text-orange-400" />
+              </div>
+              <CardTitle>Weights & Scoring</CardTitle>
+              <CardDescription>
+                Explore the configurable weights that determine room preferences and priority calculations.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <ul class="space-y-2 text-sm text-muted-foreground">
+                <li class="flex items-center gap-2">
+                  <div class="w-1.5 h-1.5 bg-orange-400"></div>
+                  10 preference weights
+                </li>
+                <li class="flex items-center gap-2">
+                  <div class="w-1.5 h-1.5 bg-orange-400"></div>
+                  Priority multipliers
+                </li>
+                <li class="flex items-center gap-2">
+                  <div class="w-1.5 h-1.5 bg-orange-400"></div>
+                  Special bonuses & penalties
+                </li>
+              </ul>
+            </CardContent>
+          </Card>
+        </a>
+
+        <a href="/usage" class="group">
+          <Card className="h-full transition-all hover:border-emerald-500/50 hover:shadow-lg hover:shadow-emerald-500/10">
+            <CardHeader>
+              <div class="w-12 h-12 bg-emerald-500/20 flex items-center justify-center mb-4 group-hover:bg-emerald-500/30 transition-colors">
+                <Terminal className="w-6 h-6 text-emerald-400" />
+              </div>
+              <CardTitle>Usage Guide</CardTitle>
+              <CardDescription>
+                Get started quickly with CLI commands, configuration files, and API usage.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <ul class="space-y-2 text-sm text-muted-foreground">
+                <li class="flex items-center gap-2">
+                  <div class="w-1.5 h-1.5 bg-emerald-400"></div>
+                  CLI commands & flags
+                </li>
+                <li class="flex items-center gap-2">
+                  <div class="w-1.5 h-1.5 bg-emerald-400"></div>
+                  Configuration schemas
+                </li>
+                <li class="flex items-center gap-2">
+                  <div class="w-1.5 h-1.5 bg-emerald-400"></div>
+                  Gemini AI integration
+                </li>
+              </ul>
+            </CardContent>
+          </Card>
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- Key Concepts Section -->
+  <section class="py-20 border-t border-industrial-border bg-industrial-card/30">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="grid lg:grid-cols-2 gap-16 items-center">
+        <div class="space-y-8">
+          <h2 class="text-3xl font-bold text-gray-100">Why This Algorithm?</h2>
+          
+          <div class="space-y-6">
+            <div class="flex gap-4">
+              <div class="w-10 h-10 bg-warning/20 flex items-center justify-center flex-shrink-0">
+                <Sparkles className="w-5 h-5 text-warning" />
+              </div>
+              <div>
+                <h3 class="font-semibold text-gray-100 mb-1">Globally Optimal</h3>
+                <p class="text-sm text-muted-foreground">
+                  The Hungarian Algorithm finds the assignment that maximizes total satisfaction 
+                  across all residents, not just individual preferences.
+                </p>
+              </div>
+            </div>
+
+            <div class="flex gap-4">
+              <div class="w-10 h-10 bg-orange-500/20 flex items-center justify-center flex-shrink-0">
+                <Users className="w-5 h-5 text-orange-400" />
+              </div>
+              <div>
+                <h3 class="font-semibold text-gray-100 mb-1">Fair & Transparent</h3>
+                <p class="text-sm text-muted-foreground">
+                  Priority weights reward contributions (finding the house, handling viewings) 
+                  while preference weights let everyone express what matters to them.
+                </p>
+              </div>
+            </div>
+
+            <div class="flex gap-4">
+              <div class="w-10 h-10 bg-emerald-500/20 flex items-center justify-center flex-shrink-0">
+                <Home className="w-5 h-5 text-emerald-400" />
+              </div>
+              <div>
+                <h3 class="font-semibold text-gray-100 mb-1">Real-World Considerations</h3>
+                <p class="text-sm text-muted-foreground">
+                  Handles couples, safety concerns, bed types, and more. 
+                  Special bonuses and penalties ensure practical constraints are respected.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="blueprint-card p-8">
+          <h3 class="text-lg font-semibold text-gray-100 mb-6">Quick Example</h3>
+          <div class="space-y-4">
+            <div class="code-block p-4">
+              <code class="text-sm">
+                <span class="text-muted-foreground"># Run the assignment algorithm</span><br/>
+                <span class="text-warning">bun</span> <span class="text-emerald-400">run</span> assign<br/><br/>
+                <span class="text-muted-foreground"># Generate room config from Rightmove</span><br/>
+                <span class="text-warning">bun</span> <span class="text-emerald-400">run</span> rightmove <span class="text-orange-400">--url</span> <span class="text-orange-300">"..."</span>
+              </code>
+            </div>
+            <p class="text-xs text-muted-foreground">
+              See the <a href="/usage" class="text-warning hover:underline">usage guide</a> for complete documentation.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+</Layout>

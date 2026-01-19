@@ -1,0 +1,270 @@
+---
+import Layout from '../layouts/Layout.astro';
+import { CodeBlock } from '../components/CodeBlock';
+import { UsageTabs } from '../components/UsageTabs';
+import { RoomFieldsAccordion } from '../components/RoomFieldsAccordion';
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../components/ui/card';
+import { Badge } from '../components/ui/badge';
+
+const programmaticCode = `import { buildRoomMetrics, buildPeopleMeta, buildDeterministicScores } from "./lib/scoring";
+import { assignRooms, solveAssignment } from "./lib/assignment";
+
+// Load your config
+const houseConfig = await Bun.file("data/house.json").json();
+const peopleConfig = await Bun.file("data/people.json").json();
+
+// Build metrics
+const roomMetrics = buildRoomMetrics(houseConfig.rooms);
+const peopleMeta = buildPeopleMeta(peopleConfig.people, peopleConfig.defaults);
+
+// Score all person-room combinations
+const scores = buildDeterministicScores(
+  peopleConfig.people,
+  houseConfig.rooms,
+  roomMetrics,
+  peopleMeta,
+  "amplify" // or "bonus"
+);
+
+// Solve optimal assignment
+const { assignment, totalScore } = assignRooms(
+  scores,
+  peopleConfig.people,
+  houseConfig.rooms
+);
+
+// assignment is Map<string, string> (personId -> roomId)
+for (const [personId, roomId] of assignment) {
+  console.log(personId + " -> " + roomId);
+}`;
+
+const houseJsonCode = `{
+  "name": "123 Example Street",
+  "rooms": [
+    {
+      "id": "room-a",
+      "name": "Front Bedroom",
+      "sizeSqm": 14,
+      "windows": 2,
+      "attractiveness": 7,
+      "bedType": "double",
+      "floor": 1,
+      "isFrontFacing": true,
+      "noise": 4,
+      "storage": 6,
+      "sunlight": 8,
+      "nearKitchen": false,
+      "ensuite": false
+    }
+  ]
+}`;
+
+const peopleJsonCode = `{
+  "defaults": {
+    "preferenceWeights": {
+      "size": 4, "windows": 2, "attractiveness": 3,
+      "bedType": 5, "sunlight": 2, "storage": 2,
+      "quiet": 3, "kitchenProximity": 2, "ensuite": 2, "floor": 2
+    },
+    "priorityWeights": {
+      "foundHouse": 6, "handledAgent": 4, "attendedViewing": 2
+    },
+    "priorityScale": 10,
+    "safetyConcern": 4,
+    "bedUpgradeWeight": 2.5,
+    "bedDowngradePenalty": 3
+  },
+  "people": [
+    {
+      "id": "alice",
+      "name": "Alice",
+      "gender": "female",
+      "foundHouse": true,
+      "handledAgent": false,
+      "attendedViewing": true,
+      "currentBedType": "single",
+      "relationship": {
+        "status": "single",
+        "partnerLocation": "none"
+      },
+      "hasSafetyConcern": true
+    }
+  ]
+}`;
+
+const envCode = `# .env
+GEMINI_API_KEY=your-api-key-here
+GEMINI_MODEL=gemini-3-flash-preview`;
+---
+
+<Layout title="Usage Guide" description="Get started with CLI commands, configuration, and API usage">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
+    <!-- Header -->
+    <div class="max-w-3xl mb-16">
+      <Badge variant="outline" className="mb-4">Getting Started</Badge>
+      <h1 class="text-4xl font-bold text-gray-100 mb-4">
+        Usage Guide
+      </h1>
+      <p class="text-xl text-muted-foreground">
+        Everything you need to run the housing algorithm: CLI commands, 
+        configuration files, and programmatic API usage.
+      </p>
+    </div>
+
+    <!-- Quick Start -->
+    <section class="mb-20">
+      <h2 class="text-2xl font-bold text-gray-100 mb-8">Quick Start</h2>
+      <div class="grid md:grid-cols-3 gap-6">
+        <Card className="relative overflow-hidden">
+          <div class="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-cyan-500 to-cyan-400"></div>
+          <CardHeader>
+            <div class="w-8 h-8 rounded-full bg-cyan-500/20 flex items-center justify-center mb-3">
+              <span class="text-warning font-bold">1</span>
+            </div>
+            <CardTitle className="text-lg">Install Dependencies</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <CodeBlock code="bun install" language="bash" client:load />
+          </CardContent>
+        </Card>
+
+        <Card className="relative overflow-hidden">
+          <div class="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-amber-500 to-amber-400"></div>
+          <CardHeader>
+            <div class="w-8 h-8 rounded-full bg-amber-500/20 flex items-center justify-center mb-3">
+              <span class="text-amber-400 font-bold">2</span>
+            </div>
+            <CardTitle className="text-lg">Configure Data</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p class="text-sm text-muted-foreground mb-3">
+              Create <code class="text-warning">house.json</code> and <code class="text-warning">people.json</code> in <code class="text-warning">data/</code>
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card className="relative overflow-hidden">
+          <div class="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-500 to-emerald-400"></div>
+          <CardHeader>
+            <div class="w-8 h-8 rounded-full bg-emerald-500/20 flex items-center justify-center mb-3">
+              <span class="text-emerald-400 font-bold">3</span>
+            </div>
+            <CardTitle className="text-lg">Run Assignment</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <CodeBlock code="bun run assign" language="bash" client:load />
+          </CardContent>
+        </Card>
+      </div>
+    </section>
+
+    <!-- CLI Reference -->
+    <section class="mb-20">
+      <h2 class="text-2xl font-bold text-gray-100 mb-8">CLI Reference</h2>
+      <UsageTabs client:only="react" />
+    </section>
+
+    <!-- Configuration Schemas -->
+    <section class="mb-20">
+      <h2 class="text-2xl font-bold text-gray-100 mb-8">Configuration Schemas</h2>
+      
+      <div class="space-y-8">
+        <Card>
+          <CardHeader>
+            <CardTitle>house.json</CardTitle>
+            <CardDescription>Defines all rooms and their attributes</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <CodeBlock 
+              code={houseJsonCode}
+              language="json"
+              filename="data/house.json"
+              showLineNumbers
+              client:load
+            />
+            <RoomFieldsAccordion client:only="react" />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>people.json</CardTitle>
+            <CardDescription>Defines residents, their preferences, and default weights</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <CodeBlock 
+              code={peopleJsonCode}
+              language="json"
+              filename="data/people.json"
+              showLineNumbers
+              client:load
+            />
+          </CardContent>
+        </Card>
+      </div>
+    </section>
+
+    <!-- Environment Variables -->
+    <section class="mb-20">
+      <h2 class="text-2xl font-bold text-gray-100 mb-8">Environment Variables</h2>
+      <Card>
+        <CardContent className="pt-6">
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead>
+                <tr class="border-b border-industrial-border">
+                  <th class="text-left py-2 px-3 text-gray-100">Variable</th>
+                  <th class="text-left py-2 px-3 text-gray-100">Required</th>
+                  <th class="text-left py-2 px-3 text-gray-100">Description</th>
+                </tr>
+              </thead>
+              <tbody class="text-muted-foreground">
+                <tr class="border-b border-industrial-border/50">
+                  <td class="py-2 px-3 font-mono text-warning">GEMINI_API_KEY</td>
+                  <td class="py-2 px-3"><Badge className="bg-amber-500/20 text-amber-400 border-transparent">For AI mode</Badge></td>
+                  <td class="py-2 px-3">Google Gemini API key for AI scoring and Rightmove parsing</td>
+                </tr>
+                <tr>
+                  <td class="py-2 px-3 font-mono text-warning">GEMINI_MODEL</td>
+                  <td class="py-2 px-3"><Badge className="border-cyan-500/50 text-warning">Optional</Badge></td>
+                  <td class="py-2 px-3">Default Gemini model (defaults to gemini-3-flash-preview)</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="mt-6">
+            <CodeBlock 
+              code={envCode}
+              language="bash"
+              filename=".env"
+              client:load
+            />
+          </div>
+        </CardContent>
+      </Card>
+    </section>
+
+    <!-- Programmatic API -->
+    <section>
+      <h2 class="text-2xl font-bold text-gray-100 mb-8">Programmatic API</h2>
+      <Card>
+        <CardHeader>
+          <CardTitle>Using the Library Directly</CardTitle>
+          <CardDescription>
+            Import and use the core functions in your own TypeScript code.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <CodeBlock 
+            code={programmaticCode}
+            language="typescript"
+            filename="example.ts"
+            showLineNumbers
+            client:load
+          />
+        </CardContent>
+      </Card>
+    </section>
+  </div>
+</Layout>

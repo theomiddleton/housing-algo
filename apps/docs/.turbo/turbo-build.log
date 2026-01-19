@@ -1,0 +1,21 @@
+$ astro build
+16:20:02 [content] Syncing content
+16:20:02 [content] Synced content
+16:20:02 [types] Generated 13ms
+16:20:02 [build] output: "static"
+16:20:02 [build] mode: "static"
+16:20:02 [build] directory: /Users/theo/Documents/Code/housing-algo/apps/docs/dist/
+16:20:02 [build] Collecting build info...
+16:20:02 [build] ✓ Completed in 30ms.
+16:20:02 [build] Building static entrypoints...
+16:20:02 [ERROR] [vite] ✗ Build failed in 188ms
+Unterminated string literal
+  Location:
+    /Users/theo/Documents/Code/housing-algo/apps/docs/src/pages/usage.astro:132:3256
+  Stack trace:
+    at failureErrorWithLog (/Users/theo/Documents/Code/housing-algo/node_modules/esbuild/lib/main.js:1467:15)
+    at responseCallbacks.<computed> (/Users/theo/Documents/Code/housing-algo/node_modules/esbuild/lib/main.js:603:9)
+    at Socket.readFromStdout (/Users/theo/Documents/Code/housing-algo/node_modules/esbuild/lib/main.js:581:7)
+    at addChunk (node:internal/streams/readable:559:12)
+    at Readable.push (node:internal/streams/readable:390:5)
+error: script "build" exited with code 1

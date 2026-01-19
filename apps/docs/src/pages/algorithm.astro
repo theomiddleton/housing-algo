@@ -1,0 +1,85 @@
+---
+import Layout from '../layouts/Layout.astro';
+import { AlgorithmStepper } from '../components/AlgorithmStepper';
+import { HungarianViz } from '../components/HungarianViz';
+import { AlgorithmTabs } from '../components/AlgorithmTabs';
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../components/ui/card';
+import { Badge } from '../components/ui/badge';
+---
+
+<Layout title="Algorithm" description="Deep dive into the Hungarian Algorithm for optimal room assignment">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
+    <!-- Header -->
+    <div class="max-w-3xl mb-16">
+      <Badge variant="outline" className="mb-4">Core Algorithm</Badge>
+      <h1 class="text-4xl font-bold text-gray-100 mb-4">
+        The Hungarian Algorithm
+      </h1>
+      <p class="text-xl text-muted-foreground">
+        A polynomial-time algorithm for finding the optimal assignment in a weighted 
+        bipartite graph. Perfect for matching people to rooms while maximizing total satisfaction.
+      </p>
+    </div>
+
+    <!-- Interactive Stepper -->
+    <section class="mb-20">
+      <h2 class="text-2xl font-bold text-gray-100 mb-8">Algorithm Steps</h2>
+      <AlgorithmStepper client:load />
+    </section>
+
+    <!-- Algorithm Visualization -->
+    <section class="mb-20">
+      <div class="flex items-center justify-between mb-8">
+        <h2 class="text-2xl font-bold text-gray-100">Hungarian Algorithm Visualization</h2>
+        <Badge>Interactive</Badge>
+      </div>
+      <Card>
+        <CardContent className="pt-6">
+          <HungarianViz client:load />
+        </CardContent>
+      </Card>
+    </section>
+
+    <!-- Deep Dive Sections -->
+    <section class="mb-20">
+      <h2 class="text-2xl font-bold text-gray-100 mb-8">Deep Dive</h2>
+      <AlgorithmTabs client:only="react" />
+    </section>
+
+    <!-- Code Reference -->
+    <section>
+      <h2 class="text-2xl font-bold text-gray-100 mb-8">Implementation Reference</h2>
+      <div class="grid md:grid-cols-2 gap-6">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg">lib/scoring.ts</CardTitle>
+            <CardDescription>Score calculation and normalization</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <ul class="space-y-2 text-sm text-muted-foreground">
+              <li><code class="text-warning">buildRoomMetrics()</code> - Normalize room attributes</li>
+              <li><code class="text-warning">buildPeopleMeta()</code> - Calculate priorities</li>
+              <li><code class="text-warning">scoreRoom()</code> - Calculate person-room score</li>
+              <li><code class="text-warning">buildDeterministicScores()</code> - Build full matrix</li>
+            </ul>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg">lib/assignment.ts</CardTitle>
+            <CardDescription>Hungarian algorithm implementation</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <ul class="space-y-2 text-sm text-muted-foreground">
+              <li><code class="text-warning">hungarian()</code> - Core algorithm</li>
+              <li><code class="text-warning">assignRooms()</code> - High-level API</li>
+              <li><code class="text-warning">solveAssignment()</code> - ID-based result</li>
+              <li><code class="text-warning">fnv1a()</code> - Hash for tie-breaking</li>
+            </ul>
+          </CardContent>
+        </Card>
+      </div>
+    </section>
+  </div>
+</Layout>

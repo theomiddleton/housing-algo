@@ -1,0 +1,84 @@
+---
+import Layout from '../layouts/Layout.astro';
+import { WeightExplorer } from '../components/WeightExplorer';
+import { WeightsTabs } from '../components/WeightsTabs';
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../components/ui/card';
+import { Badge } from '../components/ui/badge';
+
+const configExampleCode = `{
+  "defaults": {
+    "preferenceWeights": {
+      "size": 4,
+      "windows": 2,
+      "attractiveness": 3,
+      "bedType": 5,
+      "sunlight": 2,
+      "storage": 2,
+      "quiet": 3,
+      "kitchenProximity": 2,
+      "ensuite": 2,
+      "floor": 2
+    },
+    "priorityWeights": {
+      "foundHouse": 6,
+      "handledAgent": 4,
+      "attendedViewing": 2
+    },
+    "priorityScale": 10,
+    "safetyConcern": 4,
+    "bedUpgradeWeight": 2.5,
+    "bedDowngradePenalty": 3
+  }
+}`;
+---
+
+<Layout title="Weights & Scoring" description="Explore the configurable weights that determine room preferences">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
+    <!-- Header -->
+    <div class="max-w-3xl mb-16">
+      <Badge variant="outline" className="mb-4">Scoring System</Badge>
+      <h1 class="text-4xl font-bold text-gray-100 mb-4">
+        Weights & Scoring
+      </h1>
+      <p class="text-xl text-muted-foreground">
+        The algorithm uses a sophisticated weighting system to balance individual preferences, 
+        contribution-based priorities, and special circumstances.
+      </p>
+    </div>
+
+    <!-- Interactive Weight Explorer -->
+    <section class="mb-20">
+      <div class="flex items-center justify-between mb-8">
+        <h2 class="text-2xl font-bold text-gray-100">Interactive Weight Explorer</h2>
+        <Badge>Live Preview</Badge>
+      </div>
+      <Card>
+        <CardContent className="pt-6">
+          <WeightExplorer client:load />
+        </CardContent>
+      </Card>
+    </section>
+
+    <!-- Weight Categories -->
+    <section class="mb-20">
+      <h2 class="text-2xl font-bold text-gray-100 mb-8">Weight Categories</h2>
+      <WeightsTabs client:only="react" />
+    </section>
+
+    <!-- Configuration Example -->
+    <section>
+      <h2 class="text-2xl font-bold text-gray-100 mb-8">Configuration Example</h2>
+      <Card>
+        <CardContent className="pt-6">
+          <div class="code-block p-4">
+            <pre class="text-sm text-gray-300"><code>{configExampleCode}</code></pre>
+          </div>
+          <p class="text-sm text-muted-foreground mt-4">
+            This configuration goes in <code class="text-warning">people.json</code> under the 
+            <code class="text-warning">defaults</code> key. Individual people can override any weight.
+          </p>
+        </CardContent>
+      </Card>
+    </section>
+  </div>
+</Layout>
