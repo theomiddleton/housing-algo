@@ -75,7 +75,7 @@ export function Navigation({ currentPath }: NavigationProps) {
           {/* GitHub Link */}
           <div className="hidden md:flex items-center gap-3">
             <a
-              href="https://github.com"
+              href="https://github.com/theomiddleton/housing-algo"
               target="_blank"
               rel="noopener noreferrer"
               className="text-muted-foreground hover:text-warning transition-colors"
