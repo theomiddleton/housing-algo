@@ -52,6 +52,12 @@ export type PreferenceWeights = {
   floor: number;
 };
 
+export type ScoringPreferenceKey = keyof PreferenceWeights;
+
+export type ScoringOverrides = {
+  ignorePreferences?: ScoringPreferenceKey[];
+};
+
 export type PriorityWeights = {
   foundHouse: number;
   handledAgent: number;
@@ -143,6 +149,11 @@ export type ScoreResult = {
   reasons?: string[][];
 };
 
+export type ScoringOptions = {
+  priorityMode?: PriorityMode;
+  overrides?: ScoringOverrides;
+};
+
 export type ScoringMode = "deterministic" | "gemini";
 
 /**
@@ -199,6 +210,7 @@ export type CliOptions = {
   peoplePath?: string;
   mode?: ScoringMode;
   priorityMode?: PriorityMode;
+  scoringOverrides?: ScoringOverrides;
   json: boolean;
   help: boolean;
   gemini: GeminiCliOptions;

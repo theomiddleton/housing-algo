@@ -35,6 +35,7 @@ import type {
   PriorityMode,
   CliOptions,
   ThinkingLevel,
+  ScoringPreferenceKey,
 } from "./lib/types";
 
 const main = async () => {
@@ -49,6 +50,7 @@ const main = async () => {
   let peoplePath = options.peoplePath;
   let mode = options.mode;
   let priorityMode = options.priorityMode;
+  let scoringOverrides = options.scoringOverrides;
 
   if (!housePath) {
     const response = await prompts({
@@ -119,6 +121,39 @@ const main = async () => {
       process.exit(1);
     }
     priorityMode = response.priorityMode;
+  }
+
+  if (mode === "deterministic" && !scoringOverrides) {
+    const response = await prompts({
+      type: "multiselect",
+      name: "ignorePreferences",
+      message: colors.label("Ignore scoring inputs"),
+      choices: [
+        { title: "None", value: "none" },
+        { title: "Size", value: "size" },
+        { title: "Windows", value: "windows" },
+        { title: "Attractiveness", value: "attractiveness" },
+        { title: "Bed type", value: "bedType" },
+        { title: "Sunlight", value: "sunlight" },
+        { title: "Storage", value: "storage" },
+        { title: "Quiet", value: "quiet" },
+        { title: "Kitchen proximity", value: "kitchenProximity" },
+        { title: "Ensuite", value: "ensuite" },
+        { title: "Floor level", value: "floor" },
+      ],
+    });
+
+    const ignorePreferences = (response.ignorePreferences ?? []).filter(
+      (value: string) => value !== "none",
+    ) as string[];
+
+    const validIgnorePreferences = ignorePreferences.filter(
+      (value): value is ScoringPreferenceKey => isScoringPreferenceKey(value),
+    );
+
+    if (validIgnorePreferences.length > 0) {
+      scoringOverrides = { ignorePreferences: validIgnorePreferences };
+    }
   }
 
   // Prompt for Gemini-specific options in Gemini mode
@@ -195,6 +230,7 @@ const main = async () => {
         roomMetrics,
         peopleMeta,
         priorityMode ?? "amplify",
+        scoringOverrides,
       ),
     };
     calcSpinner.succeed("Scores calculated");
@@ -240,6 +276,7 @@ const main = async () => {
           house: houseConfig.name,
           mode: mode,
           priorityMode: mode === "deterministic" ? (priorityMode ?? "amplify") : undefined,
+          ignorePreferences: scoringOverrides?.ignorePreferences,
           totalScore: round(totalScore),
           assignments: result.map((item) => ({
             personId: item.person.id,
@@ -279,6 +316,12 @@ const main = async () => {
   log.item("Total Score", colors.highlight(round(totalScore).toString()));
   log.item("People", peopleConfig.people.length.toString());
   log.item("Rooms", houseConfig.rooms.length.toString());
+  if (scoringOverrides?.ignorePreferences?.length) {
+    log.item(
+      "Ignoring",
+      scoringOverrides.ignorePreferences.map((value) => value.replace(/([A-Z])/g, " $1").toLowerCase()).join(", "),
+    );
+  }
   log.blank();
 
   console.log(colors.label("  Assignments:"));
@@ -317,6 +360,7 @@ const parseCliArgs = (args: string[]): CliOptions => {
     parsePositiveInt,
     parseNonNegativeInt,
   } = createArgParser(args);
+
 
   const modeRaw = getFlagValue("--mode");
   const geminiQuestions = args.includes("--gemini-questions");
@@ -374,11 +418,27 @@ const parseCliArgs = (args: string[]): CliOptions => {
     ? parseNonNegativeInt(retriesRaw, "--gemini-retries")
     : undefined;
 
+  const ignorePreferences = getFlagValues("--ignore");
+  const validIgnorePreferences = ignorePreferences.filter((value): value is ScoringPreferenceKey =>
+    isScoringPreferenceKey(value),
+  );
+  if (ignorePreferences.length && validIgnorePreferences.length !== ignorePreferences.length) {
+    throw new Error(
+      `Unknown ignore option(s): ${ignorePreferences
+        .filter((value) => !isScoringPreferenceKey(value))
+        .join(", ")}.`,
+    );
+  }
+
   return {
     housePath: getFlagValue("--house"),
     peoplePath: getFlagValue("--people"),
     mode,
     priorityMode,
+    scoringOverrides:
+      validIgnorePreferences.length > 0
+        ? { ignorePreferences: validIgnorePreferences }
+        : undefined,
     json: args.includes("--json"),
     help: args.includes("--help") || args.includes("-h"),
     gemini: {
@@ -412,6 +472,11 @@ const printUsage = () => {
         {
           flag: "--priority-mode <mode>",
           description: "Priority behavior: amplify | bonus (deterministic only)",
+        },
+        {
+          flag: "--ignore <key>",
+          description:
+            "Ignore preference weights (repeatable; deterministic only)",
         },
         { flag: "--json", description: "Output JSON for integrations" },
         {
@@ -536,6 +601,22 @@ const isRelationship = (value: unknown): value is Relationship => {
     typeof relationship.partnerId === "string";
   return validStatus && validPartnerLocation && validPartnerId;
 };
+
+const SCORING_PREFERENCE_KEYS: ScoringPreferenceKey[] = [
+  "size",
+  "windows",
+  "attractiveness",
+  "bedType",
+  "sunlight",
+  "storage",
+  "quiet",
+  "kitchenProximity",
+  "ensuite",
+  "floor",
+];
+
+const isScoringPreferenceKey = (value: string): value is ScoringPreferenceKey =>
+  SCORING_PREFERENCE_KEYS.includes(value as ScoringPreferenceKey);
 
 const round = (value: number): number => Math.round(value * 100) / 100;
 

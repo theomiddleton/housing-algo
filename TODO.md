@@ -26,6 +26,11 @@
   - [ ] Council mixer algorithm
     - [ ] Deterministic 
     - [ ] AI
+      - [ ] Add openrouter SDK for various free models for council
+        - [ ] moonshotai/kimi-k2:free 
+	- [ ] deepseek/deepseek-r1-0528:free 
+        - [ ] z-ai/glm-4.5-air:free
+        - [ ] openai/gpt-oss-120b:free
 
 - [ ] Create a simple static website explaining the algorithm and its parameters.
   - [ ] Ai explanation of each parameter, its positive and negative effects and importantly biases

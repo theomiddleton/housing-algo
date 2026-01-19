@@ -15,6 +15,8 @@ import type {
   PersonDefaults,
   HouseMeta,
   PriorityMode,
+  ScoringOverrides,
+  ScoringPreferenceKey,
 } from "./types";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -226,35 +228,59 @@ export const scoreRoom = (
   meta: PersonMeta,
   houseMeta: HouseMeta,
   priorityMode: PriorityMode = "amplify",
+  overrides: ScoringOverrides = {},
 ): number => {
+  const ignored = new Set<ScoringPreferenceKey>(overrides.ignorePreferences ?? []);
+  const include = (key: ScoringPreferenceKey) => !ignored.has(key);
+
   let preferenceScore = 0;
   let bonusScore = 0;
   let penaltyScore = 0;
 
   // Base room characteristics (normalized 0-1, weighted)
-  preferenceScore += metrics.size * meta.preferenceWeights.size;
-  preferenceScore += metrics.windows * meta.preferenceWeights.windows;
-  preferenceScore += metrics.attractiveness * meta.preferenceWeights.attractiveness;
-  preferenceScore += metrics.sunlight * meta.preferenceWeights.sunlight;
-  preferenceScore += metrics.storage * meta.preferenceWeights.storage;
-  preferenceScore += metrics.quiet * meta.preferenceWeights.quiet;
+  if (include("size")) {
+    preferenceScore += metrics.size * meta.preferenceWeights.size;
+  }
+  if (include("windows")) {
+    preferenceScore += metrics.windows * meta.preferenceWeights.windows;
+  }
+  if (include("attractiveness")) {
+    preferenceScore += metrics.attractiveness * meta.preferenceWeights.attractiveness;
+  }
+  if (include("sunlight")) {
+    preferenceScore += metrics.sunlight * meta.preferenceWeights.sunlight;
+  }
+  if (include("storage")) {
+    preferenceScore += metrics.storage * meta.preferenceWeights.storage;
+  }
+  if (include("quiet")) {
+    preferenceScore += metrics.quiet * meta.preferenceWeights.quiet;
+  }
 
   // Kitchen proximity preference
   // "close" = bonus for being near kitchen, "far" = bonus for being away from kitchen
-  if (meta.kitchenPreference === "close") {
-    preferenceScore += metrics.kitchenProximity * meta.preferenceWeights.kitchenProximity;
-  } else if (meta.kitchenPreference === "far") {
-    preferenceScore += (1 - metrics.kitchenProximity) * meta.preferenceWeights.kitchenProximity;
+  if (include("kitchenProximity")) {
+    if (meta.kitchenPreference === "close") {
+      preferenceScore += metrics.kitchenProximity * meta.preferenceWeights.kitchenProximity;
+    } else if (meta.kitchenPreference === "far") {
+      preferenceScore += (1 - metrics.kitchenProximity) * meta.preferenceWeights.kitchenProximity;
+    }
   }
 
   // Ensuite preference
-  preferenceScore += metrics.ensuite * meta.preferenceWeights.ensuite;
+  if (include("ensuite")) {
+    preferenceScore += metrics.ensuite * meta.preferenceWeights.ensuite;
+  }
 
   // Floor level preference (first floor more attractive than ground)
-  preferenceScore += metrics.floorLevel * meta.preferenceWeights.floor;
+  if (include("floor")) {
+    preferenceScore += metrics.floorLevel * meta.preferenceWeights.floor;
+  }
 
   // Bed type base preference
-  preferenceScore += metrics.bedValue * meta.preferenceWeights.bedType;
+  if (include("bedType")) {
+    preferenceScore += metrics.bedValue * meta.preferenceWeights.bedType;
+  }
 
   // Bed upgrade bonus (single -> double)
   if (person.currentBedType === "single" && room.bedType === "double") {
@@ -325,6 +351,7 @@ export const buildDeterministicScores = (
   roomMetrics: RoomMetrics[],
   peopleMeta: PersonMeta[],
   priorityMode: PriorityMode = "amplify",
+  overrides?: ScoringOverrides,
 ): number[][] => {
   // Compute house-level metadata
   const houseMeta: HouseMeta = {
@@ -340,6 +367,7 @@ export const buildDeterministicScores = (
         peopleMeta[personIndex]!,
         houseMeta,
         priorityMode,
+        overrides,
       );
     });
   });
