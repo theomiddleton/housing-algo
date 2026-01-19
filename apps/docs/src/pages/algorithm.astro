@@ -3,6 +3,9 @@ import Layout from '../layouts/Layout.astro';
 import { AlgorithmStepper } from '../components/AlgorithmStepper';
 import { HungarianViz } from '../components/HungarianViz';
 import { AlgorithmTabs } from '../components/AlgorithmTabs';
+import { ChatGPTReviewButton } from '../components/ChatGPTReviewButton';
+import { GeminiReviewButton } from '../components/GeminiReviewButton';
+import { ReviewMyselfButton } from '../components/ReviewMyselfButton';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
 ---
@@ -15,10 +18,16 @@ import { Badge } from '../components/ui/badge';
       <h1 class="text-4xl font-bold text-gray-100 mb-4">
         The Hungarian Algorithm
       </h1>
-      <p class="text-xl text-muted-foreground">
+      <p class="text-xl text-muted-foreground mb-6">
         A polynomial-time algorithm for finding the optimal assignment in a weighted 
         bipartite graph. Perfect for matching people to rooms while maximizing total satisfaction.
       </p>
+      <div class="flex items-center gap-3 text-sm text-muted-foreground flex-wrap">
+        <span>Concerned about fairness?</span>
+        <ChatGPTReviewButton client:load variant="ghost" size="sm" showDescription={false} />
+        <GeminiReviewButton client:load variant="ghost" size="sm" showDescription={false} />
+        <ReviewMyselfButton client:load variant="ghost" size="sm" />
+      </div>
     </div>
 
     <!-- Interactive Stepper -->
@@ -47,7 +56,7 @@ import { Badge } from '../components/ui/badge';
     </section>
 
     <!-- Code Reference -->
-    <section>
+    <section class="mb-20">
       <h2 class="text-2xl font-bold text-gray-100 mb-8">Implementation Reference</h2>
       <div class="grid md:grid-cols-2 gap-6">
         <Card>
@@ -80,6 +89,27 @@ import { Badge } from '../components/ui/badge';
           </CardContent>
         </Card>
       </div>
+    </section>
+
+    <!-- Fairness Review CTA -->
+    <section class="border-t border-blueprint-grid pt-16">
+      <Card className="bg-gradient-to-br from-industrial-bg to-industrial-panel border-warning/20">
+        <CardContent className="py-8">
+          <div class="text-center">
+            <h3 class="text-xl font-semibold text-gray-100 mb-2">
+              Want to verify this algorithm is fair?
+            </h3>
+            <p class="text-muted-foreground mb-6 max-w-lg mx-auto">
+              Transparency matters. Get an independent AI review of our scoring and assignment code to check for potential bias.
+            </p>
+            <div class="flex items-center justify-center gap-4 flex-wrap">
+              <ChatGPTReviewButton client:load variant="default" size="lg" showDescription={false} />
+              <GeminiReviewButton client:load variant="outline" size="lg" showDescription={false} />
+              <ReviewMyselfButton client:load variant="outline" size="lg" />
+            </div>
+          </div>
+        </CardContent>
+      </Card>
     </section>
   </div>
 </Layout>

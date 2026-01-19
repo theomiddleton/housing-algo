@@ -1,6 +1,9 @@
 ---
 import '../styles/global.css';
 import { Navigation } from '../components/Navigation';
+import { ChatGPTReviewButton } from '../components/ChatGPTReviewButton';
+import { GeminiReviewButton } from '../components/GeminiReviewButton';
+import { ReviewMyselfButton } from '../components/ReviewMyselfButton';
 
 interface Props {
   title: string;
@@ -29,6 +32,11 @@ const currentPath = Astro.url.pathname;
       <div class="max-w-7xl mx-auto text-center text-sm text-muted-foreground">
         <p>Housing Algorithm Documentation</p>
         <p class="mt-1 text-xs">Optimal room assignment using the Hungarian Algorithm</p>
+        <div class="mt-6 pt-6 border-t border-blueprint-grid/50 flex items-center justify-center gap-4 flex-wrap">
+          <ChatGPTReviewButton client:load variant="link" size="sm" showDescription={false} />
+          <GeminiReviewButton client:load variant="link" size="sm" showDescription={false} />
+          <ReviewMyselfButton client:load variant="link" size="sm" />
+        </div>
       </div>
     </footer>
   </body>
